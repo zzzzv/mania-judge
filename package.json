@@ -1,0 +1,67 @@
+{
+  "name": "mania-judge",
+  "type": "module",
+  "version": "0.1.0",
+  "description": "Simulate osu!stable mania judgements.",
+  "author": "zzzzv",
+  "license": "MIT",
+  "homepage": "https://github.com/zzzzv/mania-judge#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zzzzv/mania-judge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/zzzzv/mania-judge/issues"
+  },
+  "keywords": [
+    "osu",
+    "mania",
+    "replay"
+  ],
+  "exports": {
+    ".": "./dist/index.mjs",
+    "./osu-parsers": "./dist/osu-parsers/index.mjs",
+    "./osu-parsers/node": "./dist/osu-parsers/node.mjs",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsdown",
+    "dev": "tsdown --watch",
+    "generate:test-json:tap-only": "node --env-file=.env --import tsx tests/generate-test-json.ts tap-only",
+    "generate:test-json:hold": "node --env-file=.env --import tsx tests/generate-test-json.ts hold",
+    "generate:test-json:mods": "node --env-file=.env --import tsx tests/generate-test-json.ts mods",
+    "generate:test-files": "node --import tsx tests/generate-osu-files.ts",
+    "test": "vitest",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "pnpm run build"
+  },
+  "peerDependencies": {
+    "osu-classes": "^3.2.0-beta.0",
+    "osu-mania-stable": "^5.0.1",
+    "osu-parsers": "^4.2.0-beta.0"
+  },
+  "peerDependenciesMeta": {
+    "osu-classes": {
+      "optional": true
+    },
+    "osu-mania-stable": {
+      "optional": true
+    },
+    "osu-parsers": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^25.5.0",
+    "@typescript/native-preview": "7.0.0-dev.20260328.1",
+    "jszip": "^3.10.1",
+    "osu-stable-db": "^0.2.4",
+    "tsdown": "^0.21.7",
+    "tsx": "^4.21.0",
+    "typescript": "^6.0.2",
+    "vitest": "^4.1.2"
+  }
+}
