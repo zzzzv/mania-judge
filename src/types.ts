@@ -23,6 +23,7 @@ export type Columns<T> = T[][]
 export interface OsuData {
   od: number
   hp: number
+  speedRate: number
   windowScale: number
   noteColumns: Columns<Note>
   actionColumns: Columns<Action>

@@ -1,7 +1,7 @@
 import { defineConfig } from 'tsdown'
 
 export default defineConfig({
-  entry: ['src/index.ts', 'src/osu-parsers/index.ts', 'src/osu-parsers/node.ts'],
+  entry: ['src/index.ts'],
   dts: {
     tsgo: true,
   },

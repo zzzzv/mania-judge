@@ -7,16 +7,6 @@ settings:
 importers:
 
   .:
-    dependencies:
-      osu-classes:
-        specifier: ^3.2.0-beta.0
-        version: 3.2.0-beta.0
-      osu-mania-stable:
-        specifier: ^5.0.1
-        version: 5.0.1(osu-classes@3.2.0-beta.0)
-      osu-parsers:
-        specifier: ^4.2.0-beta.0
-        version: 4.2.0-beta.0(osu-classes@3.2.0-beta.0)
     devDependencies:
       '@types/node':
         specifier: ^25.5.0
@@ -27,6 +17,9 @@ importers:
       jszip:
         specifier: ^3.10.1
         version: 3.10.1
+      osu-mania-io:
+        specifier: ^0.1.0
+        version: 0.1.0
       osu-stable-db:
         specifier: ^0.2.4
         version: 0.2.4
@@ -473,8 +466,8 @@ packages:
   '@types/jsesc@2.5.1':
     resolution: {integrity: sha512-9VN+6yxLOPLOav+7PwjZbxiID2bVaeq0ED4qSQmdQTdjnXJSaCVKTR58t15oqH1H5t8Ng2ZX1SabJVoN9Q34bw==}
 
-  '@types/node@20.19.41':
-    resolution: {integrity: sha512-ECymXOukMnOoVkC2bb1Vc/w/836DXncOg5m8Xj1RH7xSHZJWNYY6Zh7EH477vcnD5egKNNfy2RpNOmuChhFPgQ==}
+  '@types/node@20.19.43':
+    resolution: {integrity: sha512-6oYBAi5ikg4Pl+kGsoYtawUMBT2zZMCvPNF7pVLnHZfd1zf38DRiWn/gT01RYCdUqkv7Fhr+C9ot4/tb+2sVvA==}
 
   '@types/node@25.6.0':
     resolution: {integrity: sha512-+qIYRKdNYJwY3vRCZMdJbPLJAtGjQBudzZzdzwQYkEPQd+PJGixUL5QfvCLDaULoLv+RhT3LDkwEfKaAkgSmNQ==}
@@ -582,6 +575,9 @@ packages:
   detect-libc@2.1.2:
     resolution: {integrity: sha512-Btj2BOOO83o3WyH59e8MgXsxEQVcarkUOpEYrubB0urwnN10yQ364rsiByU11nZlqWYZm05i/of7io4mzihBtQ==}
     engines: {node: '>=8'}
+
+  dotnet-random-ts@0.1.0:
+    resolution: {integrity: sha512-4gURKR/DmAl6/dEBXhHW1jn6JGr2UrnAUswr6srlysyubgXDkhvpR87pVjF82zpWSMZ84Eg66uStVTOpJgAV1w==}
 
   dts-resolver@2.1.3:
     resolution: {integrity: sha512-bihc7jPC90VrosXNzK0LTE2cuLP6jr0Ro8jk+kMugHReJVLIpHz/xadeq3MhuwyO4TD4OA3L1Q8pBBFRc08Tsw==}
@@ -746,18 +742,8 @@ packages:
   osu-binary@0.1.0:
     resolution: {integrity: sha512-xsxnV29DN/DkoAlG383rJwAlkyfBaH/U7iRLtm0gVp8JEeduU4stqC+LcgfhbSb6uHH/h2X8UTLcPM4iJy6EZg==}
 
-  osu-classes@3.2.0-beta.0:
-    resolution: {integrity: sha512-w7t1tqDoeQJM3IorPs0CXadcxZ5kx/hC/LwcJMVhD9zLZOTnTVjADKkRS5a0VvzPmCKeec1sAQYFNHoNgN5z7A==}
-
-  osu-mania-stable@5.0.1:
-    resolution: {integrity: sha512-Zqzqi3LAYkUaUCDIjLAhXpxanVlTkLp2mwfYg4mdjPz+Y8HsigidzfZZo0ykg9sVmSTIEQHGG4UCRW72ehAHWA==}
-    peerDependencies:
-      osu-classes: ^3.1.0
-
-  osu-parsers@4.2.0-beta.0:
-    resolution: {integrity: sha512-+V8Ev6G/C6MPd12lLJLvINV1Z5+/E8Kx2BovMUDi6BZsqtZNjzP2QkT3GOtl0T1fN0WkoJYAdjjqAPNwyjZAFQ==}
-    peerDependencies:
-      osu-classes: ^3.2.0-beta.0
+  osu-mania-io@0.1.0:
+    resolution: {integrity: sha512-naiCcRaNYJmosdSb7bTonDmwpLu/psQ1S1Vk6o7H/79A8w4dE1ayTgkWfwNap5yGRpbVSz7REvzSJyNQMFal/Q==}
 
   osu-stable-db@0.2.4:
     resolution: {integrity: sha512-O8D2+c4Gzo1CKsQu0AJUK9dJdxe1qbNOf4Fk32H4Z9djkC+wcnFFODtPwMtRWILwvwVVBIRA5epsu5tdAMOOHA==}
@@ -1285,7 +1271,7 @@ snapshots:
 
   '@types/jsesc@2.5.1': {}
 
-  '@types/node@20.19.41':
+  '@types/node@20.19.43':
     dependencies:
       undici-types: 6.21.0
 
@@ -1388,6 +1374,8 @@ snapshots:
   defu@6.1.7: {}
 
   detect-libc@2.1.2: {}
+
+  dotnet-random-ts@0.1.0: {}
 
   dts-resolver@2.1.3: {}
 
@@ -1515,7 +1503,7 @@ snapshots:
 
   lzma-js-simple-v2@1.2.3:
     dependencies:
-      '@types/node': 20.19.41
+      '@types/node': 20.19.43
 
   magic-string@0.30.21:
     dependencies:
@@ -1527,16 +1515,11 @@ snapshots:
 
   osu-binary@0.1.0: {}
 
-  osu-classes@3.2.0-beta.0: {}
-
-  osu-mania-stable@5.0.1(osu-classes@3.2.0-beta.0):
+  osu-mania-io@0.1.0:
     dependencies:
-      osu-classes: 3.2.0-beta.0
-
-  osu-parsers@4.2.0-beta.0(osu-classes@3.2.0-beta.0):
-    dependencies:
+      dotnet-random-ts: 0.1.0
       lzma-js-simple-v2: 1.2.3
-      osu-classes: 3.2.0-beta.0
+      osu-binary: 0.1.0
 
   osu-stable-db@0.2.4:
     dependencies:

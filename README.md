@@ -8,17 +8,14 @@ Simulates osu!stable mania judgements.
 
 - Implemented: judgements, combo, and life.
 - Not implemented: score.
-- Tap-only: accurate in current tests except for a few life mismatches.
+- Tap-only: accurate in current tests.
 - Hold: not expected to be exact yet because the precise stable hold algorithm is still unknown.
-- Hold accuracy error across 47 fixtures: `0.00%` min, `0.39%` max, `0.16%` average.
 - Mod coverage: `HT`, `DT`, `HR`, `EZ`, and `MR`.
 - Not supported: `RD`.
 
 ## Usage
 
-### Main entry
-
-Use the main entry if you already have `osuData`. This path does not need the parser peer dependencies.
+### Core simulation
 
 ```ts
 import { v1, calcAccuracy } from 'mania-judge'
@@ -33,20 +30,30 @@ if (lastFrame) {
 }
 ```
 
-### Parser entries
+### Parsing `.osu` / `.osr` files
 
-Use these entries if you want to parse `.osu` and `.osr`. They require the peer dependencies `osu-classes`, `osu-mania-stable`, and `osu-parsers`.
-
-```ts
-import { parse } from 'mania-judge/osu-parsers'
-
-const result = await parse(beatmapContent, replayBuffer)
-console.log(result.osuData)
-```
+Use [`osu-mania-io`](https://github.com/zzzzv/osu-mania-io) to parse beatmap and replay files, then convert the result with the adapter functions in `column.ts`:
 
 ```ts
-import { parseFromPath } from 'mania-judge/osu-parsers/node'
+import { parseBeatmap } from 'osu-mania-io/beatmap'
+import { parseReplay } from 'osu-mania-io/replay'
+import { applyLegacyBeatmapMods } from 'osu-mania-io/mod'
+import { beatmapToNoteColumns, replayToActionColumns } from 'mania-judge'
 
-const result = await parseFromPath('map.osu', 'score.osr')
-console.log(result.osuData)
+const beatmap = parseBeatmap(osuContent)
+const replay = parseReplay(osrBuffer, beatmap.difficulty.keyCount)
+
+// Apply mods if needed.
+const effective = replay.mods !== 0
+  ? applyLegacyBeatmapMods(beatmap, replay.mods)
+  : beatmap
+
+const osuData = {
+  od: effective.difficulty.overallDifficulty,
+  hp: effective.difficulty.hpDrainRate,
+  speedRate: 'speedMultiplier' in effective ? effective.speedMultiplier : 1,
+  windowScale: 'hitWindowScale' in effective ? effective.hitWindowScale : 1,
+  noteColumns: beatmapToNoteColumns(effective),
+  actionColumns: replayToActionColumns(replay.frames, beatmap.difficulty.keyCount),
+}
 ```

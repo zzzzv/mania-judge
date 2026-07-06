@@ -1,13 +1,16 @@
+import { readFile } from 'node:fs/promises'
 import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 
+import { parseBeatmap } from 'osu-mania-io/beatmap'
+import { parseReplay } from 'osu-mania-io/replay'
+import { applyLegacyBeatmapMods } from 'osu-mania-io/mod'
 import { GameplayModes, Mods } from 'osu-stable-db'
 import { getConfiguredOsuFolder } from 'osu-stable-db/node'
 import type { BeatmapScoreMatch, BeatmapScoreQuery } from 'osu-stable-db/node'
 
-import { v1, calcAccuracy } from '../src'
-import { parseFromPath } from '../src/osu-parsers/node'
+import { v1, calcAccuracy, beatmapToNoteColumns, replayToActionColumns } from '../src'
 import { formatJson, pathExists, sanitizeFileNamePart } from './utils'
 import type { FixtureOutput } from './fixture-types'
 
@@ -98,7 +101,7 @@ const getScoreMods = (scoreMods: number) => {
 }
 
 const createScoreStatistics = (
-  score: BeatmapScoreMatch['score'] | Awaited<ReturnType<typeof parseFromPath>>['rawScore']['info'],
+  score: BeatmapScoreMatch['score'],
 ): HitResultTable<number> => {
   return [
     score.countGeki,
@@ -111,7 +114,7 @@ const createScoreStatistics = (
 }
 
 const getScoreAccuracy = (
-  score: BeatmapScoreMatch['score'] | Awaited<ReturnType<typeof parseFromPath>>['rawScore']['info'],
+  score: BeatmapScoreMatch['score'],
 ) => {
   return calcAccuracy(createScoreStatistics(score), [...v1.accTable] as HitResultTable<number>)
 }
@@ -217,25 +220,59 @@ const createOutputFromPath = async (
   beatmapPath: string,
   replayPath: string,
 ): Promise<FixtureOutput> => {
-  const { rawBeatmap, rawScore, osuData } = await parseFromPath(beatmapPath, replayPath)
-  const modsBitmask = rawScore.info.mods?.bitwise ?? Number(rawScore.info.rawMods ?? 0)
-  const statistics: HitResultTable<number> = createScoreStatistics(rawScore.info)
-  const holdRatio = rawBeatmap.hitObjects.length > 0 ? rawBeatmap.holds.length / rawBeatmap.hitObjects.length : 0
+  const [beatmapContent, replayBuffer] = await Promise.all([
+    readFile(beatmapPath, 'utf8'),
+    readFile(replayPath),
+  ])
+
+  const beatmap = parseBeatmap(beatmapContent)
+  const keyCount = beatmap.difficulty.keyCount
+  const replay = parseReplay(replayBuffer, keyCount)
+  const mods = replay.mods
+  const modded = mods !== 0 ? applyLegacyBeatmapMods(beatmap, mods) : undefined
+  const effectiveBeatmap = modded ?? beatmap
+  const holdRatio = beatmap.hitObjects.length > 0
+    ? beatmap.hitObjects.filter((o) => o.endTime !== undefined).length / beatmap.hitObjects.length
+    : 0
+
+  const speedRate = 'speedMultiplier' in effectiveBeatmap
+    ? (effectiveBeatmap as { speedMultiplier: number }).speedMultiplier
+    : 1
+  const windowScale = 'hitWindowScale' in effectiveBeatmap
+    ? (effectiveBeatmap as { hitWindowScale: number }).hitWindowScale
+    : 1
+
+  const osuData = {
+    od: effectiveBeatmap.difficulty.overallDifficulty,
+    hp: effectiveBeatmap.difficulty.hpDrainRate,
+    speedRate,
+    windowScale,
+    noteColumns: beatmapToNoteColumns(effectiveBeatmap),
+    actionColumns: replayToActionColumns(replay.frames, keyCount),
+  }
+  const statistics: HitResultTable<number> = [
+    replay.statistics[0],
+    replay.statistics[1],
+    replay.statistics[2],
+    replay.statistics[3],
+    replay.statistics[4],
+    replay.statistics[5],
+  ]
 
   return {
-    title: rawBeatmap.metadata.titleUnicode || rawBeatmap.metadata.title || '',
-    difficulty: rawBeatmap.metadata.version || '',
-    creator: rawBeatmap.metadata.creator || '',
+    title: beatmap.metadata.title ?? '',
+    difficulty: beatmap.metadata.version ?? '',
+    creator: beatmap.metadata.creator ?? '',
     holdRatio,
     scoreInfo: {
-      combo: rawScore.info.maxCombo,
-      totalScore: rawScore.info.totalScore,
-      mods: getScoreMods(modsBitmask),
-      modsBitmask,
+      combo: replay.maxCombo,
+      totalScore: replay.totalScore,
+      mods: getScoreMods(replay.mods),
+      modsBitmask: replay.mods,
       statistics,
-      accuracy: getScoreAccuracy(rawScore.info),
+      accuracy: calcAccuracy(statistics, [...v1.accTable] as HitResultTable<number>),
     },
-    lifeFrames: rawScore.replay!.lifeBar.map((frame) => [frame.startTime, frame.health]),
+    lifeFrames: [],
     osuData,
   }
 }
@@ -268,7 +305,7 @@ const isConditionGroupName = (value: string): value is ConditionGroupName => {
 const main = async () => {
   const groupName = process.argv[2]
   if (!groupName || !isConditionGroupName(groupName)) {
-    throw new Error('Usage: generate-test-json.ts <tap-only|hold|mods>')
+    throw new Error('Usage: generate-test-json-stable.ts <tap-only|hold|mods>')
   }
 
   const osuFolder = getConfiguredOsuFolder()
@@ -283,7 +320,7 @@ const main = async () => {
 
   const query = osuFolder.createBeatmapScoreQuery(osuDatabase, scoresDatabase)
   const sourcePaths = await querySourcePaths(query, CONDITION_GROUPS[groupName])
-  const outputDir = path.resolve(import.meta.dirname, `fixtures/json/${groupName}`)
+  const outputDir = path.resolve(import.meta.dirname, `fixtures/stable/${groupName}`)
   const exportCount = (await writeOutputs(outputDir, sourcePaths)).length
   const maxCount = CONDITION_GROUPS[groupName].reduce((total, condition) => total + condition.count, 0)
   console.log(`Generated ${exportCount}/${maxCount} ${groupName} fixtures in ${outputDir}`)

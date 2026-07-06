@@ -44,3 +44,10 @@ export function compareJudgements<T extends BaseJudgement<Note>>(a: T, b: T): nu
 export function isHoldJudgement(judgement: JudgementV1): judgement is HoldJudgementV1 {
   return judgement.note.end !== undefined
 }
+
+export function countResults(judgements: JudgementV1[]): HitResultTable<number> {
+  return judgements.reduce((sum, j) => {
+    sum[j.result] += 1;
+    return sum;
+  }, [0, 0, 0, 0, 0, 0] as HitResultTable<number>);
+}

@@ -207,6 +207,6 @@ export function play(
 }
 
 export function playOsu(data: OsuData): Columns<JudgementV1> {
-  const windows = truncWindows(baseWindows(data.od), data.windowScale)
+  const windows = truncWindows(baseWindows(data.od), data.speedRate * data.windowScale)
   return play(data.noteColumns, data.actionColumns, windows)
 }
