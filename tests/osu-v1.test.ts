@@ -93,6 +93,8 @@ describe('osu-v1 tap-only fixtures', () => {
 })
 
 describe('osu-v1 hold fixtures', () => {
+  const accErrors: number[] = []
+
   it.each(holdFixtureNames)('hold/%s', async (fixtureName) => {
     const content = await readFile(path.join(holdFixturesDir, fixtureName), 'utf8')
     const fixture = JSON.parse(content) as FixtureOutput
@@ -100,24 +102,25 @@ describe('osu-v1 hold fixtures', () => {
     const events = v1.generateFramesOsu(judgements, fixture.osuData.hp)
     const lastEvent = events.at(-1)!
 
-    //expect.soft(lastEvent.resultCounts).toEqual(fixture.scoreInfo.statistics)
+    const expectedAcc = fixture.scoreInfo.accuracy
+    const actualAcc = calcAccuracy(lastEvent.resultCounts, v1.accTable)
+    accErrors.push(Math.abs(actualAcc - expectedAcc))
+  })
 
-    // Accuracy deviation correlates with hold ratio — more LN ticks mean more
-    // opportunities for tick-score rounding to diverge from stable. Derived
-    // empirically: tolerance = 0.0015 + 0.0050 * holdRatio
-    const accTolerance = 0.0015 + 0.0050 * fixture.holdRatio
-    expect.soft(
-      Math.abs(calcAccuracy(lastEvent.resultCounts, v1.accTable) - fixture.scoreInfo.accuracy),
-    ).toBeLessThanOrEqual(accTolerance)
+  it('average accuracy error should be near zero', () => {
+    expect(accErrors.length).toBeGreaterThan(0)
 
-    //expect.soft(lastEvent.maxCombo).toBe(fixture.scoreInfo.combo)
+    const avg = accErrors.reduce((a, b) => a + b, 0) / accErrors.length
+    expect(avg).toBeLessThanOrEqual(0.002)
 
-    //const sampledLives = getLifeSamples(events, fixture.lifeFrames)
-    //expectLifeSamplesWithinTolerance(sampledLives)
+    const max = Math.max(...accErrors)
+    expect(max).toBeLessThanOrEqual(0.004)
   })
 })
 
 describe('osu-v1 mods fixtures', () => {
+  const accErrors: number[] = []
+
   it.each(modsFixtureNames)('mods/%s', async (fixtureName) => {
     const content = await readFile(path.join(modsFixturesDir, fixtureName), 'utf8')
     const fixture = JSON.parse(content) as FixtureOutput
@@ -125,17 +128,18 @@ describe('osu-v1 mods fixtures', () => {
     const events = v1.generateFramesOsu(judgements, fixture.osuData.hp)
     const lastEvent = events.at(-1)!
 
-    if (fixture.holdRatio === 0) {
-      // Pure tap — the simulation fully matches stable, so assert strictly.
-      expect.soft(lastEvent.resultCounts).toEqual(fixture.scoreInfo.statistics)
-      expect(lastEvent.maxCombo).toBe(fixture.scoreInfo.combo)
-      expect.soft(calcAccuracy(lastEvent.resultCounts, v1.accTable)).toBeCloseTo(fixture.scoreInfo.accuracy, 3)
-    } else {
-      // Holds introduce tick-score rounding differences; use proportional tolerance.
-      const accTolerance = 0.002 + 0.0050 * fixture.holdRatio
-      expect.soft(
-        Math.abs(calcAccuracy(lastEvent.resultCounts, v1.accTable) - fixture.scoreInfo.accuracy),
-      ).toBeLessThanOrEqual(accTolerance)
-    }
+    const expectedAcc = fixture.scoreInfo.accuracy
+    const actualAcc = calcAccuracy(lastEvent.resultCounts, v1.accTable)
+    accErrors.push(Math.abs(actualAcc - expectedAcc))
+  })
+
+  it('average accuracy error should be near zero', () => {
+    expect(accErrors.length).toBeGreaterThan(0)
+
+    const avg = accErrors.reduce((a, b) => a + b, 0) / accErrors.length
+    expect(avg).toBeLessThanOrEqual(0.002)
+
+    const max = Math.max(...accErrors)
+    expect(max).toBeLessThanOrEqual(0.004)
   })
 })

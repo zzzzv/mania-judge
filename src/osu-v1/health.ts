@@ -3,10 +3,15 @@ import type {
   Columns,
   HitResult,
   HitResultTable,
-  JudgementV1,
 } from '../types'
-import { compareJudgements, isHoldJudgement } from '../extensions'
+import type { JudgementV1 } from './types'
+import { isHoldJudgement } from './types'
 import { difficultyRange } from '../utils'
+
+function compareJudgements(a: { exit: number; note: { start: number } }, b: typeof a): number {
+  if (a.exit !== b.exit) return a.exit - b.exit
+  return a.note.start - b.note.start
+}
 
 function getLifeIncreaseFor(result: HitResult, hp: number, hpMultiplierNormal = 1) {
   switch (result) {

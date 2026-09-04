@@ -2,16 +2,26 @@
 
 Work in progress.
 
-Simulates osu!stable mania judgements.
+Simulates osu!mania judgements.
 
 ## Status
 
+- Score is not implemented.
+- Mods: support is determined by osu-mania-io. Current tested coverage includes `HT`, `DT`, `HR`, `EZ`, and `MR`.
+
+### v1
+
 - Implemented: judgements, combo, and life.
-- Not implemented: score.
 - Tap-only: accurate in current tests.
-- Hold: not expected to be exact yet because the precise stable hold algorithm is still unknown.
-- Mod coverage: `HT`, `DT`, `HR`, `EZ`, and `MR`.
-- Not supported: `RD`.
+- Hold: validated by accuracy-only tests with average error capped at 0.002 and max error capped at 0.004.
+- Mods fixtures: accuracy-only tests cap average error at 0.002 and max error at 0.004.
+
+### lazer
+
+- Implemented: judgements.
+- Tap-only: accurate in current tests.
+- Hold: validated by accuracy-only tests with average error capped at 0.001 and max error capped at 0.002.
+- Mods fixtures: accuracy-only tests cap average error at 0.0005 and max error at 0.002.
 
 ## Usage
 

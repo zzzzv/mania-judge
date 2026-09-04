@@ -42,31 +42,13 @@ export type HitResult = typeof HIT_RESULTS[keyof typeof HIT_RESULTS]
 export type HitResultTable<T> = [T, T, T, T, T, T]
 export type HitWindows = HitResultTable<number>
 
-export interface BaseJudgement<T extends Note> {
-  note: T
+export interface TapJudgement {
+  note: TapNote
   enter: number
   exit: number
-  actions: Action[]
-}
-
-export interface TapJudgement extends BaseJudgement<TapNote> {
+  action?: Action
   result: HitResult
 }
-
-export interface HoldJudgementV1 extends BaseJudgement<HoldNote> {
-  result: HitResult
-  breakTime?: number
-  ticks: number[]
-}
-
-export interface HoldJudgementV2 extends BaseJudgement<HoldNote> {
-  headResult: HitResult
-  tailResult: HitResult
-  breakTime?: number
-}
-
-export type JudgementV1 = TapJudgement | HoldJudgementV1
-export type JudgementV2 = TapJudgement | HoldJudgementV2
 
 export interface TimeLineFrame {
   time: number

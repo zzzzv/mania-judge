@@ -11,41 +11,16 @@ import { getConfiguredOsuFolder } from 'osu-stable-db/node'
 import type { BeatmapScoreMatch, BeatmapScoreQuery } from 'osu-stable-db/node'
 
 import { v1, calcAccuracy, beatmapToNoteColumns, replayToActionColumns } from '../src'
-import { formatJson, pathExists, sanitizeFileNamePart } from './utils'
+import { formatJson, pathExists } from './utils'
 import type { FixtureOutput } from './fixture-types'
+import {
+  CONDITION_GROUPS,
+  validateConditions,
+  createOutputFileName,
+} from './shared'
+import type { QueryCondition } from './shared'
 
 import type { HitResultTable } from '../src/types'
-
-interface QueryCondition {
-  holdRatioRange: [number, number]
-  accuracyRange: [number, number]
-  count: number
-  mods: string[]
-}
-
-type ConditionGroupName = 'tap-only' | 'hold' | 'mods'
-
-const CONDITION_GROUPS: Record<ConditionGroupName, QueryCondition[]> = {
-  'tap-only': [
-    { holdRatioRange: [0, 0], accuracyRange: [0.9, 0.919999], count: 10, mods: ['NM'] },
-    { holdRatioRange: [0, 0], accuracyRange: [0.92, 0.939999], count: 10, mods: ['NM'] },
-    { holdRatioRange: [0, 0], accuracyRange: [0.94, 0.959999], count: 10, mods: ['NM'] },
-    { holdRatioRange: [0, 0], accuracyRange: [0.96, 0.98], count: 10, mods: ['NM'] },
-  ],
-  'hold': [
-    { holdRatioRange: [0.3, 0.7], accuracyRange: [0.9, 0.919999], count: 10, mods: ['NM'] },
-    { holdRatioRange: [0.3, 0.7], accuracyRange: [0.92, 0.939999], count: 10, mods: ['NM'] },
-    { holdRatioRange: [0.3, 0.7], accuracyRange: [0.94, 0.959999], count: 10, mods: ['NM'] },
-    { holdRatioRange: [0.3, 0.7], accuracyRange: [0.96, 0.98], count: 10, mods: ['NM'] },
-  ],
-  'mods': [
-    { holdRatioRange: [0, 1], accuracyRange: [0.9, 1], count: 5, mods: ['EZ'] },
-    { holdRatioRange: [0, 1], accuracyRange: [0.9, 1], count: 5, mods: ['HR'] },
-    { holdRatioRange: [0, 1], accuracyRange: [0.9, 1], count: 5, mods: ['MR'] },
-    { holdRatioRange: [0, 1], accuracyRange: [0.9, 1], count: 5, mods: ['DT'] },
-    { holdRatioRange: [0, 1], accuracyRange: [0.9, 1], count: 5, mods: ['HT'] },
-  ],
-}
 
 const MOD_ACRONYMS: [number, string][] = [
   [Mods.NoFail, 'NF'],
@@ -149,19 +124,7 @@ const querySourcePaths = async (
   query: BeatmapScoreQuery,
   conditions: QueryCondition[],
 ): Promise<[string, string][]> => {
-  for (const condition of conditions) {
-    if (condition.holdRatioRange[0] > condition.holdRatioRange[1]) {
-      throw new Error('holdRatioRange must be in ascending order.')
-    }
-
-    if (condition.accuracyRange[0] > condition.accuracyRange[1]) {
-      throw new Error('accuracyRange must be in ascending order.')
-    }
-
-    if (!Number.isInteger(condition.count) || condition.count <= 0) {
-      throw new Error('count must be a positive integer.')
-    }
-  }
+  validateConditions(conditions)
 
   const counts = conditions.map(() => 0)
   const results: [string, string][] = []
@@ -277,13 +240,7 @@ const createOutputFromPath = async (
   }
 }
 
-const createOutputFileName = (output: FixtureOutput) => {
-  const titlePart = sanitizeFileNamePart(output.title || 'untitled')
-  const difficultyPart = sanitizeFileNamePart(output.difficulty || 'difficulty')
-  return `${titlePart}-${difficultyPart}-${(output.scoreInfo.accuracy * 100).toFixed(2)}.json`
-}
-
-const writeOutputs = async (outputDir: string, sourcePaths: [string, string][]) => {
+const writeOutputsFromSources = async (outputDir: string, sourcePaths: [string, string][]) => {
   await mkdir(outputDir, { recursive: true })
 
   const filePaths: string[] = []
@@ -298,13 +255,9 @@ const writeOutputs = async (outputDir: string, sourcePaths: [string, string][]) 
   return filePaths
 }
 
-const isConditionGroupName = (value: string): value is ConditionGroupName => {
-  return value in CONDITION_GROUPS
-}
-
 const main = async () => {
   const groupName = process.argv[2]
-  if (!groupName || !isConditionGroupName(groupName)) {
+  if (!groupName || !(groupName in CONDITION_GROUPS)) {
     throw new Error('Usage: generate-test-json-stable.ts <tap-only|hold|mods>')
   }
 
@@ -318,11 +271,12 @@ const main = async () => {
     osuFolder.readScoresDatabase(),
   ])
 
+  const conditions = CONDITION_GROUPS[groupName as keyof typeof CONDITION_GROUPS]
   const query = osuFolder.createBeatmapScoreQuery(osuDatabase, scoresDatabase)
-  const sourcePaths = await querySourcePaths(query, CONDITION_GROUPS[groupName])
+  const sourcePaths = await querySourcePaths(query, conditions)
   const outputDir = path.resolve(import.meta.dirname, `fixtures/stable/${groupName}`)
-  const exportCount = (await writeOutputs(outputDir, sourcePaths)).length
-  const maxCount = CONDITION_GROUPS[groupName].reduce((total, condition) => total + condition.count, 0)
+  const exportCount = (await writeOutputsFromSources(outputDir, sourcePaths)).length
+  const maxCount = conditions.reduce((total: number, condition) => total + condition.count, 0)
   console.log(`Generated ${exportCount}/${maxCount} ${groupName} fixtures in ${outputDir}`)
 }
 

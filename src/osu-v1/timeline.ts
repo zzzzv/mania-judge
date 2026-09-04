@@ -3,10 +3,10 @@ import type {
   Columns,
   HitResult,
   HitResultTable,
-  JudgementV1,
   TimeLineFrame,
 } from '../types'
-import { compareJudgements, isHoldJudgement } from '../extensions'
+import type { JudgementV1 } from './types'
+import { isHoldJudgement } from './types'
 import { clamp } from '../utils'
 
 import { computeHpMultiplierNormal, createLifeTable } from './health'
@@ -45,7 +45,10 @@ function compareEvents(left: TimeLineEvent, right: TimeLineEvent): number {
     return left.time - right.time
   }
 
-  return compareJudgements(left.judgement, right.judgement)
+  // Same time: order by exit time, then note start time
+  const a = left.judgement, b = right.judgement
+  if (a.exit !== b.exit) return a.exit - b.exit
+  return a.note.start - b.note.start
 }
 
 export function generateFrames(

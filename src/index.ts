@@ -1,4 +1,5 @@
 export * from './types'
 export * as v1 from './osu-v1'
+export * as lazer from './osu-lazer'
 export * from './column'
-export * from './extensions'
+export * from './utils'

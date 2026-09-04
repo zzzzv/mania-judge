@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { HIT_RESULTS, v1, type Columns, type HitResultTable, type JudgementV1 } from '../src'
+import { HIT_RESULTS, v1, type Columns, type HitResultTable } from '../src'
+import type { JudgementV1 } from '../src/osu-v1/types'
 
 describe('generateTimeLine', () => {
   it('applies hold ticks to combo and life without changing result counts', () => {
@@ -12,9 +13,9 @@ describe('generateTimeLine', () => {
         },
         enter: 0,
         exit: 100,
-        actions: [],
+        action: undefined,
         result: HIT_RESULTS.Miss,
-      }],
+      } as JudgementV1],
       [{
         note: {
           column: 1,

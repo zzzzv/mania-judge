@@ -8,25 +8,10 @@ import type {
   Columns,
   OsuData,
   TapJudgement,
-  HoldJudgementV1,
-  JudgementV1,
-  HitResultTable,
 } from '../types'
 import { type ActionCursor, createActionCursor } from '../column'
-import { truncWindows } from '../extensions'
-
-export const accTable: Readonly<HitResultTable<number>> = [1.0, 1.0, 2 / 3, 1 / 3, 1 / 6, 0.0]
-
-export function baseWindows(od: number): HitWindows {
-  return [
-    16,
-    64 - 3 * od,
-    97 - 3 * od,
-    127 - 3 * od,
-    151 - 3 * od,
-    188 - 3 * od,
-  ]
-}
+import { truncWindows } from '../utils'
+import { baseWindows, type HoldJudgementV1, type JudgementV1 } from './types'
 
 function judgeTap(
   note: TapNote,
@@ -37,7 +22,7 @@ function judgeTap(
     note,
     enter: Math.max(note.start - windows[HIT_RESULTS.Miss], cursor.time),
     exit: note.start + windows[HIT_RESULTS.Ok],
-    actions: [],
+    action: undefined,
     result: HIT_RESULTS.Miss,
   }
 
@@ -49,7 +34,7 @@ function judgeTap(
     const action = cursor.getNextAction()!
 
     judgement.exit = action.press
-    judgement.actions.push(action)
+    judgement.action = action
     cursor.setNextTime(action.press + 1)
 
     const delta = Math.abs(action.press - note.start)
@@ -84,6 +69,7 @@ function judgeHold(
   note: HoldNote,
   cursor: ActionCursor,
   windows: HitWindows,
+  lnWindows: HitWindows,
   nextNote: Note | undefined,
 ): HoldJudgementV1 {
   const judgement: HoldJudgementV1 = {
@@ -94,8 +80,6 @@ function judgeHold(
     result: HIT_RESULTS.Miss,
     ticks: [],
   }
-
-  const factors = [1.2, 1.1, 1.0, 1.0, 1.0, 1.0]
 
   while (cursor.getNextAction() && cursor.getNextAction()!.press < judgement.enter) {
     cursor.setNextTime(cursor.getNextAction()!.release + 1)
@@ -150,7 +134,7 @@ function judgeHold(
     const tailDelta = Math.abs(release - note.end)
 
     for (let i = HIT_RESULTS.Perfect; i <= HIT_RESULTS.Ok; i++) {
-      const window = windows[i] * factors[i]
+      const window = lnWindows[i]
       if (headDelta <= window && headDelta + tailDelta <= window * 2) {
         judgement.result = i
         break
@@ -179,6 +163,10 @@ function judgeHold(
 export function playColumn(notes: Note[], actions: Action[], windows: HitWindows): JudgementV1[] {
   const judgements: JudgementV1[] = []
   const cursor = createActionCursor(actions)
+  const lnFactors = [1.2, 1.1, 1.0, 1.0, 1.0, 1.0]
+  const lnWindows = truncWindows(windows.map((w, i) => w * lnFactors[i]) as HitWindows, 1)
+  windows = truncWindows(windows, 1)
+  
 
   for (let i = 0; i < notes.length; i++) {
     const note = notes[i]
@@ -187,7 +175,7 @@ export function playColumn(notes: Note[], actions: Action[], windows: HitWindows
     if (note.end === undefined) {
       judgements.push(judgeTap(note, cursor, windows))
     } else {
-      judgements.push(judgeHold(note, cursor, windows, nextNote))
+      judgements.push(judgeHold(note, cursor, windows, lnWindows, nextNote))
     }
   }
 
@@ -207,6 +195,7 @@ export function play(
 }
 
 export function playOsu(data: OsuData): Columns<JudgementV1> {
-  const windows = truncWindows(baseWindows(data.od), data.speedRate * data.windowScale)
+  const windows = baseWindows(data.od).map(w => w * data.speedRate * data.windowScale) as HitWindows
+  // const windows = truncWindows(baseWindows(data.od), data.speedRate * data.windowScale)
   return play(data.noteColumns, data.actionColumns, windows)
 }

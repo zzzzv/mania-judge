@@ -1,7 +1,10 @@
 export {
   accTable,
-  baseWindows,
-  play,
+  baseWindows,  isHoldJudgement,
+  countResults,
+} from './types'
+export type { HoldJudgementV1, JudgementV1 } from './types'
+export {  play,
   playColumn,
   playOsu,
 } from './judgement'
