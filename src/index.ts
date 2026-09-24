@@ -1,5 +1,7 @@
 export * from './types'
 export * as v1 from './osu-v1'
 export * as lazer from './osu-lazer'
+export type { HoldJudgementV1, JudgementV1 } from './osu-v1/types'
+export type { HoldJudgementV2, JudgementV2 } from './osu-lazer/types'
 export * from './column'
 export * from './utils'

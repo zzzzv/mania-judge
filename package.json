@@ -1,8 +1,8 @@
 {
   "name": "mania-judge",
   "type": "module",
-  "version": "0.3.0",
-  "description": "Simulate osu!stable mania judgements.",
+  "version": "0.3.1",
+  "description": "Simulate osu!mania judgements.",
   "author": "zzzzv",
   "license": "MIT",
   "homepage": "https://github.com/zzzzv/mania-judge#readme",
