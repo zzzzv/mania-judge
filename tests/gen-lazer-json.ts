@@ -6,7 +6,7 @@ import { parseReplay } from 'osu-mania-io/replay'
 import { applyBeatmapMods, applyLegacyBeatmapMods } from 'osu-mania-io/mod'
 import type { LazerMod, LegacyModBitmask } from 'osu-mania-io/mod'
 
-import { v1, calcAccuracy, beatmapToNoteColumns, replayToActionColumns } from '../src'
+import { v1, calcAccuracy, beatmapToNoteColumns, replayToActionColumns, replayToFrameTimes } from '../src'
 import type { FixtureOutput } from './fixture-types'
 import { CONDITION_GROUPS, validateConditions, writeOutputs } from './shared'
 import type { QueryCondition, ConditionGroupName } from './shared'
@@ -258,6 +258,7 @@ const createFixtureFromLazerScore = async (
     windowScale,
     noteColumns: beatmapToNoteColumns(effectiveBeatmap),
     actionColumns: replayToActionColumns(replay.frames, beatmap.difficulty.keyCount),
+    frameTimes: replayToFrameTimes(replay.frames),
   }
 
   // Build scoreInfo

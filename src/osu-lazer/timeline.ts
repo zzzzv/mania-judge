@@ -30,28 +30,21 @@ function createEvents(judgement: JudgementV2): TimeLineEvent[] {
     }]
   }
 
-  // Hold note: generate both head and tail events
-  const events: TimeLineEvent[] = []
-
-  // Head event
-  events.push({
-    time: judgement.headExit,
-    judgement,
-    result: judgement.headResult,
-    affectsResultCounts: true,
-  })
-
-  // Tail event (if different from head, or if tail was missed)
-  if (judgement.tailEnter !== judgement.headExit || judgement.tailResult === HIT_RESULTS.Miss) {
-    events.push({
+  // 长条在 lazer 里拆成 HeadNote / TailNote 两个对象，各自一定产出一个结果
+  return [
+    {
+      time: judgement.headExit,
+      judgement,
+      result: judgement.headResult,
+      affectsResultCounts: true,
+    },
+    {
       time: judgement.tailEnter,
       judgement,
       result: judgement.tailResult,
       affectsResultCounts: true,
-    })
-  }
-
-  return events
+    },
+  ]
 }
 
 function compareEvents(left: TimeLineEvent, right: TimeLineEvent): number {

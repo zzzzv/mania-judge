@@ -4,7 +4,7 @@ import { HIT_RESULTS, v1, type Columns, type HitResultTable } from '../src'
 import type { JudgementV1 } from '../src/osu-v1/types'
 
 describe('generateTimeLine', () => {
-  it('applies hold ticks to combo and life without changing result counts', () => {
+  it('adds combo and life for hold ticks but keeps them out of result counts', () => {
     const judgements: Columns<JudgementV1> = [
       [{
         note: {
@@ -34,6 +34,8 @@ describe('generateTimeLine', () => {
     const frames = v1.generateFrames(judgements, lifeTable)
 
     expect(frames).toHaveLength(2)
+
+    // 100ms 处：漏接把连击清零，随后 tick 把连击加回 1；tick 按 300 回血，但不进档位计数
     expect(frames[0]).toMatchObject({
       time: 100,
       combo: 1,
@@ -49,5 +51,6 @@ describe('generateTimeLine', () => {
       resultCounts: [0, 1, 0, 0, 0, 1],
     })
     expect(frames[1].life).toBeCloseTo(0.9)
+    expect(frames[1].score).toBeTypeOf('number')
   })
 })

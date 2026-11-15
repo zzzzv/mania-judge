@@ -1,69 +1,114 @@
 # mania-judge
 
-Work in progress.
+Simulates osu!mania judgements, combo, life and ScoreV1 from `.osu` + `.osr` data.
 
-Simulates osu!mania judgements.
+The design goal is a **faithful reproduction of osu!stable** rather than an approximation:
+judgement is evaluated per column (each column only talks to its own notes and its own
+input), and the whole run is judged first, then combo / life / score are derived from the
+resulting judgement list.
+
+- [中文说明](./README.zh-CN.md)
+- [osu!v1 判定逻辑](./doc/osu-v1-mania-judgement.md)（中文）
+- [osu!v1 时间轴逻辑](./doc/osu-v1-timeline.md)（中文）
 
 ## Status
 
-- Score is not implemented.
-- Mods: support is determined by osu-mania-io. Current tested coverage includes `HT`, `DT`, `HR`, `EZ`, and `MR`.
+Work in progress. Numbers below come from 97 replay fixtures (7K–18K mania maps) that are
+compared against the counts / score / combo stored in the `.osr` header.
 
-### v1
+### v1 (osu!stable)
 
-- Implemented: judgements, combo, and life.
-- Tap-only: accurate in current tests.
-- Hold: validated by accuracy-only tests with average error capped at 0.002 and max error capped at 0.004.
-- Mods fixtures: accuracy-only tests cap average error at 0.002 and max error at 0.004.
+**Judgement** — column-based state machine driven by the replay's raw frame times.
+
+- 90 / 97 fixtures match the header's six-tier counts exactly.
+- The remaining 7 fixtures differ by 1–5 events out of 1.5k–14k objects (all 7K maps).
+  The same rule set is implemented by
+  [osumania4k_replay_analyser](https://github.com/SWt0619/osumania4k_replay_analyser),
+  which agrees with this library on 0 / 181,577 objects — so the residual is shared rule
+  deviation, not an implementation gap between the two.
+
+**Timeline** — combo / life / ScoreV1 derived from the judgement list.
+
+| Item | Exact | Note |
+| --- | --- | --- |
+| max combo | 73 / 97 | the rest are off by ±1 |
+| ScoreV1 | 43 / 97 | the rest are off by a median of ±50 (≈0.01%), worst 1136 (0.15%) |
+| life | — | `.osr` does not store the process HP bar, so there is no ground truth |
+
+Judgement and timeline are tested separately (`tests/osu-v1-judgement.test.ts`,
+`tests/osu-v1-timeline.test.ts`), with exact assertions and no tolerance.
 
 ### lazer
 
-- Implemented: judgements.
-- Tap-only: accurate in current tests.
-- Hold: validated by accuracy-only tests with average error capped at 0.001 and max error capped at 0.002.
-- Mods fixtures: accuracy-only tests cap average error at 0.0005 and max error at 0.002.
+**tap-only is exact**: 38 / 38 fixtures match the header's six-tier counts, max combo exact on
+37 / 38.
+
+Long notes are implemented (head and tail judged separately, break → repress supported, tail capped
+to Meh when the head was missed or the body broke) but **not exact yet**:
+
+| Group | Exact | Total \|Δ\| | Per fixture |
+| --- | --- | --- | --- |
+| hold | 1 / 31 | 726 | ≈ 23 events |
+| mods | 0 / 12 | 348 | ≈ 29 events |
+
+The residual is pure misclassification between Perfect / Great / Good: the number of events and the
+Miss / Meh totals match, and the error is the same size in both directions. It points at the timing
+edge cases of the tail rather than at the event structure.
 
 ## Usage
-
-### Core simulation
 
 ```ts
 import { v1, calcAccuracy } from 'mania-judge'
 
 const judgements = v1.playOsu(osuData)
-const frames = v1.generateFramesOsu(judgements, osuData.hp)
-const lastFrame = frames.at(-1)
+const frames = v1.generateFramesOsu(judgements, osuData.hp, ['HR'])
+const last = frames.at(-1)!
 
-if (lastFrame) {
-  const accuracy = calcAccuracy(lastFrame.resultCounts, v1.accTable)
-  console.log(lastFrame.resultCounts, lastFrame.maxCombo, lastFrame.life, accuracy)
-}
+console.log(last.resultCounts, last.maxCombo, last.life, last.score)
+console.log(calcAccuracy(last.resultCounts, v1.accTable))
 ```
 
-### Parsing `.osu` / `.osr` files
+The third argument of `generateFramesOsu` is the replay's mod list; it only affects ScoreV1
+(`NF` / `EZ` / `HT` halve the score).
 
-Use [`osu-mania-io`](https://github.com/zzzzv/osu-mania-io) to parse beatmap and replay files, then convert the result with the adapter functions in `column.ts`:
+```ts
+// ScoreV1 on its own
+const score = v1.calculateScoreV1(judgements.flat(), ['DT'])
+```
+
+### Loading a replay
+
+This library has no runtime dependencies and does not touch files: it takes plain data, and
+`createOsuData` accepts **any** object shape-compatible with `BeatmapLike` / `ReplayLike`.
+With [`osu-mania-io`](https://github.com/zzzzv/osu-mania-io):
 
 ```ts
 import { parseBeatmap } from 'osu-mania-io/beatmap'
 import { parseReplay } from 'osu-mania-io/replay'
 import { applyLegacyBeatmapMods } from 'osu-mania-io/mod'
-import { beatmapToNoteColumns, replayToActionColumns } from 'mania-judge'
+import { createOsuData } from 'mania-judge'
 
 const beatmap = parseBeatmap(osuContent)
 const replay = parseReplay(osrBuffer, beatmap.difficulty.keyCount)
 
-// Apply mods if needed.
+// where mods get applied is up to you; the modded beatmap carries speedMultiplier / hitWindowScale
 const effective = replay.mods !== 0
-  ? applyLegacyBeatmapMods(beatmap, replay.mods)
+  ? (applyLegacyBeatmapMods(beatmap, replay.mods) ?? beatmap)
   : beatmap
 
-const osuData = {
-  od: effective.difficulty.overallDifficulty,
-  hp: effective.difficulty.hpDrainRate,
-  speedRate: 'speedMultiplier' in effective ? effective.speedMultiplier : 1,
-  windowScale: 'hitWindowScale' in effective ? effective.hitWindowScale : 1,
-  noteColumns: beatmapToNoteColumns(effective),
-  actionColumns: replayToActionColumns(replay.frames, beatmap.difficulty.keyCount),
-}
+const osuData = createOsuData(effective, replay)
 ```
+
+Mod application stays outside the library on purpose: it needs the mod table, not the judging
+engine.
+
+## Development
+
+- Fixtures are generated from a local osu! install: `node --env-file=.env --import tsx tests/gen-stable-json.ts <tap-only|hold|mods>`.
+- `pnpm test` runs the whole suite. Judgement and timeline tests assert exact equality, so
+  the failing cases are the current known gaps and are meant to be read as a to-do list.
+
+## Credits
+
+Thanks to [uuUlazis/osumania-replay-analyzer](https://github.com/uuUlazis/osumania-replay-analyzer):
+the osu!stable judgement and scoring rules implemented here are ported from that project.

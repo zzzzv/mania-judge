@@ -1,5 +1,6 @@
 import { HIT_RESULTS } from '../types'
 import type {
+  HitResult,
   HitWindows,
   TapNote,
   HoldNote,
@@ -9,79 +10,81 @@ import type {
   OsuData,
   TapJudgement,
 } from '../types'
-import { type ActionCursor, createActionCursor } from '../column'
 import { truncWindows } from '../utils'
 import { type HoldJudgementV2, type JudgementV2, baseWindows, tailWindows } from './types'
 
+/**
+ * lazer 的判定是**事件驱动**的：按键按下/松开各是一个事件，对象的被动漏接是另一个。
+ * 这里按列维护一个按键游标，逐个物件消费按键段 —— 一个长条可以吃掉多段按键
+ * （中途断开后补按），所以不能简单地「一段按键对应一个物件」。
+ */
+
+function gradeFor(delta: number, windows: HitWindows): HitResult {
+  for (let i = HIT_RESULTS.Perfect; i <= HIT_RESULTS.Miss; i++) {
+    if (delta <= windows[i]) {
+      return i
+    }
+  }
+  return HIT_RESULTS.Miss
+}
+
 function judgeTap(
   note: TapNote,
-  cursor: ActionCursor,
+  actions: readonly Action[],
+  startIndex: number,
   windows: HitWindows,
   nextNote: Note | undefined,
-): TapJudgement {
+): { judgement: TapJudgement, nextIndex: number } {
   const judgement: TapJudgement = {
     note,
-    enter: Math.max(note.start - windows[HIT_RESULTS.Miss], cursor.time),
+    enter: note.start - windows[HIT_RESULTS.Miss],
     exit: note.start + windows[HIT_RESULTS.Meh],
     action: undefined,
     result: HIT_RESULTS.Miss,
   }
 
-  while (cursor.getNextAction() && cursor.getNextAction()!.press < judgement.enter) {
-    cursor.setNextTime(cursor.getNextAction()!.press + 1)
+  let index = startIndex
+  while (index < actions.length && actions[index]!.press < judgement.enter) {
+    index++
   }
 
-  if (cursor.getNextAction() && cursor.getNextAction()!.press <= judgement.exit) {
-    const action = cursor.getNextAction()!
+  if (index < actions.length && actions[index]!.press <= judgement.exit) {
+    const action = actions[index]!
 
-    // Note lock: if the next note's start has passed, this action is for it
+    // 顺序限制：这次按键已经落在下一个物件身上了
     if (nextNote && action.press >= nextNote.start) {
-      cursor.setNextTime(action.press)
-      return judgement
+      return { judgement, nextIndex: index }
     }
 
     judgement.exit = action.press
     judgement.action = action
-    cursor.setNextTime(action.press + 1)
-
-    const delta = Math.abs(action.press - note.start)
-    for (let i = HIT_RESULTS.Perfect; i <= HIT_RESULTS.Miss; i++) {
-      if (delta <= windows[i]) {
-        judgement.result = i
-        break
-      }
-    }
-  } else {
-    cursor.setNextTime(judgement.exit)
+    judgement.result = gradeFor(Math.abs(action.press - note.start), windows)
+    index++
   }
 
-  return judgement
+  return { judgement, nextIndex: index }
 }
 
-// ── Hold judgement (lazer-style) ─────────────────────────────────────
-
+/**
+ * 长条：头判一次按下，尾判在「覆盖尾部的那一段按键」的松手时刻。
+ *
+ * 中途断开（在尾巴可判定区之前松手）记为 broken，之后补按仍然可以拿到尾巴，
+ * 但尾巴结果封顶到 Meh —— 与 lazer 的 `DrawableHoldNoteTail.GetCappedResult` 一致。
+ */
 function judgeHold(
   note: HoldNote,
-  cursor: ActionCursor,
+  actions: readonly Action[],
+  startIndex: number,
   windows: HitWindows,
-  tailWindows: HitWindows,
+  tails: HitWindows,
   nextNote: Note | undefined,
-): HoldJudgementV2 {
+): { judgement: HoldJudgementV2, nextIndex: number } {
   const missWindow = windows[HIT_RESULTS.Miss]
   const mehWindow = windows[HIT_RESULTS.Meh]
 
-  // The head action must be found within the head's miss window.
-  // Additionally, lazer blocks starting a hold if past tail.start+MehWindow
-  // (the tail's OnPressed check: Time.Current > Tail.StartTime && !CanBeHit).
-  const headEnter = Math.max(note.start - missWindow, cursor.time)
-  const headLateDeadline = Math.min(
-    note.start + missWindow,
-    note.end + mehWindow,
-  )
-
   const judgement: HoldJudgementV2 = {
     note,
-    headEnter: headEnter,
+    headEnter: note.start - missWindow,
     headExit: 0,
     tailEnter: 0,
     tailExit: 0,
@@ -90,96 +93,115 @@ function judgeHold(
     tailResult: HIT_RESULTS.Miss,
   }
 
-  // Skip actions before the head's enter window
-  while (cursor.getNextAction() && cursor.getNextAction()!.press < headEnter) {
-    cursor.setNextTime(cursor.getNextAction()!.press + 1)
+  let index = startIndex
+  while (index < actions.length && actions[index]!.press < judgement.headEnter) {
+    index++
   }
 
-  if (!cursor.getNextAction() || cursor.getNextAction()!.press > headLateDeadline) {
-    // No usable action → full miss at the miss deadline
-    const autoMissTime = Math.min(note.start + mehWindow, note.end + mehWindow)
-    judgement.headExit = autoMissTime
-    judgement.tailEnter = autoMissTime
-    judgement.tailExit = autoMissTime
-    cursor.setNextTime(autoMissTime)
-    return judgement
+  const head = actions[index]
+
+  /**
+   * 能不能「开始这条长条」：
+   * - 不能早于 head 的 Miss 窗口（`beginHoldAt` 里直接 return，不进 holding）
+   * - 已经越过尾巴时，尾巴必须还处在可命中窗口内（`OnPressed` 顶部的 return false）
+   * - 同列顺序限制：这一下已经属于下一个物件了
+   */
+  const headDeadline = Math.min(note.start + missWindow, note.end + mehWindow)
+
+  const canStart = head !== undefined
+    && !(nextNote && head.press >= nextNote.start)
+    && head.press <= headDeadline
+
+  if (!canStart) {
+    judgement.headExit = note.start + mehWindow
+    judgement.tailEnter = note.end + tails[HIT_RESULTS.Meh]
+    judgement.tailExit = judgement.tailEnter
+    return { judgement, nextIndex: index }
   }
 
-  const action = cursor.getNextAction()!
+  judgement.actions.push(head)
+  judgement.headExit = head.press
 
-  // Note lock: if the next note's start has passed, this action is for it.
-  if (nextNote && action.press >= nextNote.start) {
-    cursor.setNextTime(action.press)
-    return judgement
+  // 头判只有落在 head 的 Miss 窗口内才会落判，否则保持未判（之后按 Meh 窗口自动 miss）
+  const headDelta = Math.abs(head.press - note.start)
+  if (headDelta <= missWindow) {
+    judgement.headResult = gradeFor(headDelta, windows)
   }
 
-  judgement.actions.push(action)
+  // 从这一段开始向後找「能结算尾巴」的那一段
+  const tailHit = tails[HIT_RESULTS.Miss]
+  let tailRelease: number | undefined
+  let broken = false
+  let cursorIndex = index
 
-  // ── Head result (press timing, base windows) ────────────────
-  const headDelta = Math.abs(action.press - note.start)
-  for (let i = HIT_RESULTS.Perfect; i <= HIT_RESULTS.Miss; i++) {
-    if (headDelta <= windows[i]) {
-      judgement.headResult = i
+  while (cursorIndex < actions.length) {
+    const action = actions[cursorIndex]!
+
+    // 尾巴已经自动漏接，后面的按键再怎么按也救不回来
+    if (action.press > note.end + tailHit) {
       break
     }
-  }
-  judgement.headExit = action.press
 
-  // ── Tail result (release timing, 1.5× expanded windows) ────
-  // Use pre-computed tailWindows that match lazer's effective bounds.
-  const absTailDelta = Math.abs(action.release - note.end)
+    judgement.actions.push(action)
 
-  if (absTailDelta > tailWindows[HIT_RESULTS.Miss]) {
-    // Release outside the expanded miss window → auto-miss
-    judgement.tailResult = HIT_RESULTS.Miss
-    const missThreshold = Math.ceil(tailWindows[HIT_RESULTS.Miss])
-    judgement.tailEnter = action.release > note.end
-      ? note.end + missThreshold
-      : note.end - missThreshold
-    judgement.tailExit = judgement.tailEnter
-  } else {
-    for (let i = HIT_RESULTS.Perfect; i <= HIT_RESULTS.Miss; i++) {
-      if (absTailDelta <= tailWindows[i]) {
-        judgement.tailResult = i
-        break
-      }
+    if (action.release > note.end + tailHit) {
+      // 松得太晚：尾巴在 `end + Meh` 那一刻就已经自动漏接
+      cursorIndex++
+      break
     }
-    judgement.tailEnter = action.release
-    judgement.tailExit = action.release
+
+    if (action.release >= note.end - tailHit) {
+      tailRelease = action.release
+      break
+    }
+
+    // 提前松手 ⇒ 断条，但之后补按仍然可以把尾巴救回来
+    broken = true
+    cursorIndex++
   }
 
-  // ── Tail capping (DrawableHoldNoteTail.GetCappedResult) ─────
-  if (judgement.headResult === HIT_RESULTS.Miss && judgement.tailResult < HIT_RESULTS.Meh) {
+  if (tailRelease === undefined) {
+    judgement.tailResult = HIT_RESULTS.Miss
+    judgement.tailEnter = note.end + tailHit
+    judgement.tailExit = judgement.tailEnter
+    return { judgement, nextIndex: cursorIndex }
+  }
+
+  judgement.tailResult = gradeFor(Math.abs(tailRelease - note.end), tails)
+  judgement.tailEnter = tailRelease
+  judgement.tailExit = tailRelease
+
+  // 头 miss 或中途断开 ⇒ 尾巴最高只能到 Meh
+  if ((judgement.headResult === HIT_RESULTS.Miss || broken)
+    && judgement.tailResult < HIT_RESULTS.Meh) {
     judgement.tailResult = HIT_RESULTS.Meh
   }
 
-  // ── Body break ──────────────────────────────────────────────
-  if (judgement.tailResult === HIT_RESULTS.Miss) {
-    judgement.breakTime = judgement.tailEnter
-  }
-
-  cursor.setNextTime(action.release + 1)
-  return judgement
+  return { judgement, nextIndex: cursorIndex + 1 }
 }
-
-// ── Column & full play ───────────────────────────────────────────────
 
 export function playColumn(
   notes: Note[],
   actions: Action[],
   windows: HitWindows,
-  tailWindows?: HitWindows,
+  tails?: HitWindows,
 ): JudgementV2[] {
   const judgements: JudgementV2[] = []
-  const cursor = createActionCursor(actions)
+  const tailW = tails ?? windows
+  let index = 0
 
   for (let i = 0; i < notes.length; i++) {
-    const note = notes[i]
+    const note = notes[i]!
     const nextNote = notes[i + 1]
+
     if (note.end === undefined) {
-      judgements.push(judgeTap(note, cursor, windows, nextNote))
+      const { judgement, nextIndex } = judgeTap(note, actions, index, windows, nextNote)
+      judgements.push(judgement)
+      index = nextIndex
     } else {
-      judgements.push(judgeHold(note, cursor, windows, tailWindows!, nextNote))
+      const { judgement, nextIndex } = judgeHold(note, actions, index, windows, tailW, nextNote)
+      judgements.push(judgement)
+      index = nextIndex
     }
   }
 
@@ -190,17 +212,16 @@ export function play(
   noteColumns: Columns<Note>,
   actionColumns: Columns<Action>,
   windows: HitWindows,
-  tailWindows?: HitWindows,
+  tails?: HitWindows,
 ): Columns<JudgementV2> {
   const judgements: Columns<JudgementV2> = []
   for (let i = 0; i < noteColumns.length; i++) {
-    judgements.push(playColumn(noteColumns[i], actionColumns[i], windows, tailWindows))
+    judgements.push(playColumn(noteColumns[i]!, actionColumns[i]!, windows, tails))
   }
   return judgements
 }
 
 export function playOsu(data: OsuData): Columns<JudgementV2> {
   const windows = truncWindows(baseWindows(data.od), data.speedRate * data.windowScale)
-  const tailW = tailWindows(windows)
-  return play(data.noteColumns, data.actionColumns, windows, tailW)
+  return play(data.noteColumns, data.actionColumns, windows, tailWindows(windows))
 }

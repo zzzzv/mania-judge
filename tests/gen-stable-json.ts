@@ -10,7 +10,7 @@ import { GameplayModes, Mods } from 'osu-stable-db'
 import { getConfiguredOsuFolder } from 'osu-stable-db/node'
 import type { BeatmapScoreMatch, BeatmapScoreQuery } from 'osu-stable-db/node'
 
-import { v1, calcAccuracy, beatmapToNoteColumns, replayToActionColumns } from '../src'
+import { v1, calcAccuracy, createOsuData } from '../src'
 import { formatJson, pathExists } from './utils'
 import type { FixtureOutput } from './fixture-types'
 import {
@@ -198,21 +198,7 @@ const createOutputFromPath = async (
     ? beatmap.hitObjects.filter((o) => o.endTime !== undefined).length / beatmap.hitObjects.length
     : 0
 
-  const speedRate = 'speedMultiplier' in effectiveBeatmap
-    ? (effectiveBeatmap as { speedMultiplier: number }).speedMultiplier
-    : 1
-  const windowScale = 'hitWindowScale' in effectiveBeatmap
-    ? (effectiveBeatmap as { hitWindowScale: number }).hitWindowScale
-    : 1
-
-  const osuData = {
-    od: effectiveBeatmap.difficulty.overallDifficulty,
-    hp: effectiveBeatmap.difficulty.hpDrainRate,
-    speedRate,
-    windowScale,
-    noteColumns: beatmapToNoteColumns(effectiveBeatmap),
-    actionColumns: replayToActionColumns(replay.frames, keyCount),
-  }
+  const osuData = createOsuData(effectiveBeatmap, replay)
   const statistics: HitResultTable<number> = [
     replay.statistics[0],
     replay.statistics[1],

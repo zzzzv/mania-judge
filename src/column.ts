@@ -1,40 +1,22 @@
 import type { Action, Columns, Note } from './types'
 
-export function createActionCursor(actions: Action[]) {
-  let index = 0
-  let time = Number.MIN_SAFE_INTEGER
-  let holdingAction: Action | null = null
-
-  return {
-    get time() {
-      return time
-    },
-    setNextTime(nextTime: number) {
-      if (nextTime > time) {
-        time = nextTime
-        while (index < actions.length && actions[index].release < time) {
-          index++
-        }
-        if (index < actions.length && actions[index].press < time) {
-          holdingAction = actions[index++]
-        } else {
-          holdingAction = null
-        }
-      }
-    },
-    getHoldingAction() {
-      return holdingAction
-    },
-    getNextAction() {
-      if (index < actions.length) {
-        return actions[index]
-      }
-      return null
-    },
+/**
+ * Extract the replay's raw frame timeline (ms, ascending, deduped).
+ * osu!stable judges on these frames, so the exact settle time of every object
+ * is "the first frame at or after the boundary" — not the boundary itself.
+ */
+export function replayToFrameTimes(
+  frames: readonly { readonly time: number }[],
+): number[] {
+  const times: number[] = []
+  for (const frame of frames) {
+    const last = times[times.length - 1]
+    if (last === undefined || last !== frame.time) {
+      times.push(frame.time)
+    }
   }
+  return times
 }
-
-export type ActionCursor = ReturnType<typeof createActionCursor>
 
 /**
  * Group beatmap hit objects into per-column note arrays.
@@ -75,9 +57,9 @@ export function replayToActionColumns(
   const columns: Columns<Action> = Array.from({ length: keyCount }, () => [])
   const lastPress: (number | null)[] = Array.from({ length: keyCount }, () => null)
 
+  // 回放里会有负时间帧（a lead-in / 暂停），stable 是照常处理的：
+  // 掉进开头的那次按下会一直算到对应音符上，丢掉它会让整列的配对错位。
   for (const frame of frames) {
-    if (frame.time < 0) continue
-
     for (let col = 0; col < keyCount; col++) {
       const pressed = frame.columns[col] ?? false
 
