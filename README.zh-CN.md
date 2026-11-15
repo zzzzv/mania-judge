@@ -9,6 +9,18 @@
 - [osu!v1 判定逻辑](./doc/osu-v1-mania-judgement.md)
 - [osu!v1 时间轴逻辑](./doc/osu-v1-timeline.md)
 
+## 安装
+
+```sh
+npm install mania-judge
+# 或
+pnpm add mania-judge
+# 或
+yarn add mania-judge
+```
+
+只有 ESM 产物，自带类型声明，无运行时依赖。
+
 ## 现状
 
 仍在开发中。下面的数字来自 97 张回放样本（7K–18K 的 mania 谱面），对照的是 `.osr`
@@ -97,7 +109,9 @@ mod 计算刻意留在库外：它需要的是 mod 表，不是判定引擎。
 
 ## 开发
 
-- 样本生成：`node --env-file=.env --import tsx tests/gen-stable-json.ts <tap-only|hold|mods>`（需要本机 osu! 安装目录）。
+- 把 `.env.example` 复制成 `.env`，把 `OSU_STABLE_DIR` 指向本机 osu! 安装目录。
+- 样本由脚本从该目录生成，**不入库**：`node --env-file=.env --import tsx tests/gen-stable-json.ts <tap-only|hold|mods>`
+  （lazer 用 `gen-lazer-json.ts`）。新克隆的仓库要先生成样本，`pnpm test` 才有数据。
 - `pnpm test` 跑全量。判定层与时间轴层都是精确断言，**失败用例就是当前的已知差异清单**，
   应当当作待办来读，而不是把断言放宽。
 

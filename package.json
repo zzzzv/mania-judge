@@ -38,6 +38,7 @@
     "gen:lazer-json": "pnpm gen:lazer-json:tap-only && pnpm gen:lazer-json:hold && pnpm gen:lazer-json:mods",
     "gen:osu-files": "node --import tsx tests/gen-osu-files.ts",
     "test": "vitest",
+    "test:unit": "vitest run tests/osu-data.test.ts tests/timeline.test.ts",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm run build"
   },

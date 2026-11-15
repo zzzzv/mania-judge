@@ -1,8 +1,17 @@
 node_modules
+
 dist
 *.log
+*.tsbuildinfo
+coverage
 .DS_Store
-pnpm-workspace.yaml
+
+# 本机环境（模板见 .env.example）
+.env
+.env.*
+!.env.example
+
+# 样本由 tests/gen-*.ts 从本机 osu! 生成，不入库
 tests/fixtures/generated/
 tests/fixtures/stable/
 tests/fixtures/lazer/

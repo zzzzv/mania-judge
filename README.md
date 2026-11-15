@@ -11,6 +11,18 @@ resulting judgement list.
 - [osu!v1 判定逻辑](./doc/osu-v1-mania-judgement.md)（中文）
 - [osu!v1 时间轴逻辑](./doc/osu-v1-timeline.md)（中文）
 
+## Install
+
+```sh
+npm install mania-judge
+# or
+pnpm add mania-judge
+# or
+yarn add mania-judge
+```
+
+ESM only, with bundled type declarations and no runtime dependencies.
+
 ## Status
 
 Work in progress. Numbers below come from 97 replay fixtures (7K–18K mania maps) that are
@@ -104,7 +116,10 @@ engine.
 
 ## Development
 
-- Fixtures are generated from a local osu! install: `node --env-file=.env --import tsx tests/gen-stable-json.ts <tap-only|hold|mods>`.
+- Copy `.env.example` to `.env` and point `OSU_STABLE_DIR` at your osu! install.
+- Fixtures are generated from that install and are **not** committed:
+  `node --env-file=.env --import tsx tests/gen-stable-json.ts <tap-only|hold|mods>`
+  (same for `gen-lazer-json.ts`). A fresh clone has to generate them before `pnpm test`.
 - `pnpm test` runs the whole suite. Judgement and timeline tests assert exact equality, so
   the failing cases are the current known gaps and are meant to be read as a to-do list.
 
