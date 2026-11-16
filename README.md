@@ -34,10 +34,11 @@ compared against the counts / score / combo stored in the `.osr` header.
 
 - 90 / 97 fixtures match the header's six-tier counts exactly.
 - The remaining 7 fixtures differ by 1–5 events out of 1.5k–14k objects (all 7K maps).
-  The same rule set is implemented by
-  [osumania4k_replay_analyser](https://github.com/SWt0619/osumania4k_replay_analyser),
-  which agrees with this library on 0 / 181,577 objects — so the residual is shared rule
-  deviation, not an implementation gap between the two.
+  This residual is **not** a deviation of this library from stable: the header stores the
+  counts of the original play, while stable re-judges when replaying. On a full-map test
+  (Life is Piano 7K, 1473 objects) the game's replay re-judgement gives
+  783/508/138/**26**/8/**10** versus the header's 25/11, and matches this library exactly
+  (max combo included). See [doc/osu-v1-mania-judgement.md](doc/osu-v1-mania-judgement.md).
 
 **Timeline** — combo / life / ScoreV1 derived from the judgement list.
 
@@ -45,7 +46,6 @@ compared against the counts / score / combo stored in the `.osr` header.
 | --- | --- | --- |
 | max combo | 73 / 97 | the rest are off by ±1 |
 | ScoreV1 | 43 / 97 | the rest are off by a median of ±50 (≈0.01%), worst 1136 (0.15%) |
-| life | — | `.osr` does not store the process HP bar, so there is no ground truth |
 
 Judgement and timeline are tested separately (`tests/osu-v1-judgement.test.ts`,
 `tests/osu-v1-timeline.test.ts`), with exact assertions and no tolerance.

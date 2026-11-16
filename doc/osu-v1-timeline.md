@@ -49,8 +49,6 @@
 结果夹在 `[0, 1]`。`hpMultiplierNormal` 通过「如果全程 MAX 会回多少血」与谱面 HP drain
 的比较反复放大 1%（`health.ts`）。
 
-> `.osr` 不记录过程血条，这一层**没有真值可对照**，只能保证内部自洽。
-
 ## ScoreV1
 
 对应 stable 的 `ManiaScoreSubmission.onJudgment`。每次判定贡献两项，再乘 `mult / 320`：

@@ -37,6 +37,9 @@ interface NoteState {
   enter: number
   exit: number
   breakTime: number | undefined
+  /** 每次提前松手都记一次（重新按下后再次提前松手会再重置连击） */
+  breakTimes: number[]
+  breakRecorded: boolean
   /** 首次「变暗」的时刻：之后这条长条已经不可能再被按下，stable 就是在这时判的漏接 */
   dimTime: number | undefined
   current: Action | undefined
@@ -149,7 +152,10 @@ function collectKeyFrames(
       }
       const stop = Math.min(action.release, note.end)
       for (let time = action.press + LN_TICK_MS; time <= stop; time += LN_TICK_MS) {
-        const frame = resolveBoundary(time, frameTimes)
+        // 网格点落在 start 之前时（提前按下的长条），tick 实际发生在
+        // 「不早于 start 的第一帧」：此时最后一个 tick 时刻还没前进，
+        // 该帧一到就满足 now - lastTick >= 100。只按 press + 100k 取帧会漏掉它。
+        const frame = resolveBoundary(Math.max(time, note.start), frameTimes)
         if (Number.isFinite(frame)) {
           frames.add(frame)
         }
@@ -265,8 +271,13 @@ function judgeHoldState(
       return 'wait'
     }
     state.wasBroken = true
-    if (state.breakTime === undefined) {
-      state.breakTime = now
+    // 同一次按下期间只记一次 break（同一帧内每次重判都会返回 break，但连击已归零）
+    if (!state.breakRecorded) {
+      state.breakRecorded = true
+      state.breakTimes.push(now)
+      if (state.breakTime === undefined) {
+        state.breakTime = now
+      }
     }
     return 'break'
   }
@@ -338,6 +349,8 @@ function tickNote(state: NoteState, now: number, runtime: ColumnRuntime): void {
     state.isHeld = true
     state.headJudged = true
     state.lastTick = state.pressTime
+    // 重新按下后，下一次提前松手要再次触发 break（stable 每帧都会重判，松开即重置连击）
+    state.breakRecorded = false
     return
   }
 
@@ -476,6 +489,8 @@ function createState(note: Note, originalIndex: number, runtime: ColumnRuntime):
     enter: note.start - runtime.early,
     exit: (note.end ?? note.start) + runtime.w100,
     breakTime: undefined,
+    breakTimes: [],
+    breakRecorded: false,
     dimTime: undefined,
     current: undefined,
     originalIndex,
@@ -540,6 +555,7 @@ export function playColumnFrames(
         actions: state.actions,
         result: state.judgement,
         breakTime: state.breakTime,
+        breakTimes: state.breakTimes,
         ticks: state.ticks,
       }
       judgements[state.originalIndex] = hold

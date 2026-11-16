@@ -131,8 +131,9 @@ function buildEvents(judgements: readonly JudgementV1[]): ScoreEvent[] {
       for (const tick of judgement.ticks) {
         events.push({ ...base, time: tick, kind: 'tick', result: HIT_RESULTS.Great })
       }
-      if (judgement.breakTime !== undefined) {
-        events.push({ ...base, time: judgement.breakTime, kind: 'break', result: HIT_RESULTS.Miss })
+      for (const breakTime of judgement.breakTimes
+        ?? (judgement.breakTime !== undefined ? [judgement.breakTime] : [])) {
+        events.push({ ...base, time: breakTime, kind: 'break', result: HIT_RESULTS.Miss })
       }
     }
 

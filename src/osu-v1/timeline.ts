@@ -28,9 +28,10 @@ function createEvents(judgement: JudgementV1): TimeLineEvent[] {
       events.push({ time: tick, kind: 'tick', judgement, result: HIT_RESULTS.Great })
     }
 
-    if (judgement.breakTime !== undefined) {
+    for (const breakTime of judgement.breakTimes
+      ?? (judgement.breakTime !== undefined ? [judgement.breakTime] : [])) {
       events.push({
-        time: judgement.breakTime,
+        time: breakTime,
         kind: 'break',
         judgement,
         result: HIT_RESULTS.Miss,

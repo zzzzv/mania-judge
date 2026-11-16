@@ -143,9 +143,49 @@ max(end + W100, end + W50 + 1, start + W50 + 1)
 
 ## 已知偏差
 
-- 97 张样本里 90 张档位计数完全一致。
-- 剩 7 张（都是 7K）各差 1–5 个事件，net 差为 0，属于同一张谱不同回放时偶发。
-- 同一套规则在
-  [osumania4k_replay_analyser](https://github.com/SWt0619/osumania4k_replay_analyser)
-  里与本实现逐物件比对为 0 / 181,577，说明残差来自「两边共用的规则 vs stable」，
-  而不是两个实现之间的差异。
+97 张样本里 90 张的档位计数与 `.osr` 抬头（回放自带的统计）完全一致；剩 7 张（都是 7K）
+各差 1–5 个事件，net 差为 0。
+
+**这批残差不是本实现对 stable 的偏差，而是 stable 自己「播放回放」与「当初游玩」的差异。**
+抬头记的是当初游玩时的判定，而 stable 播回放时会按当前帧重新判定，两者本来就不保证相同。
+拿整图实测（Life is Piano 7K，1473 物件 / 572 长条，无 mod）可以直接看出来：
+
+| | MAX | 300 | 200 | 100 | 50 | MISS | maxCombo |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 当初游玩（`.osr` 抬头） | 783 | 508 | 138 | 25 | 8 | 11 | 1494 |
+| 本实现 | 783 | 508 | 138 | 26 | 8 | 10 | 1494 |
+| 游戏回放重判（tosu 抓取） | 783 | 508 | 138 | 26 | 8 | 10 | 1494 |
+
+也就是说：游戏自己播这条回放，判出来也是 26/10，与当初游玩的 25/11 不同；而本实现与游戏
+回放重判逐档一致，连 maxCombo 都一致。所以残差的归因是「stable 回放 ≠ 当初游玩」，
+不能用 `.osr` 抬头当作判定正确性的基准。
+
+除这张整图外，另测了 5 个 30 秒片段（合计约 3000 物件，7K 长条密集）和一个 5 秒片段，
+游戏回放重判与本实现同样逐档 0 差异。
+
+## 游戏内实测（可选验证）
+
+`tools/tosu-verdict-capture/index.mjs` 用 tosu（`http://127.0.0.1:24050/json/v2`）在 stable
+播放回放时抓实时判定：每次六档计数或连击变化都记一条快照，`Ctrl+C` 落盘，对账时取计数最大
+的那条快照（回到选歌界面后 tosu 会清零，`final` 不可用）。
+
+```
+node tools/tosu-verdict-capture/index.mjs D:\cap.json
+```
+
+实测样本都是**从真实回放重建**的：物件时间/列、长条端点、OD/HP、以及回放的按键帧全部来自
+`tests/fixtures/stable/hold/` 下真实 `.osr` 的解析结果（帧按原回放的真实帧时刻还原，不是只留
+按键边沿）。为了让谱面能被游戏单独导入，音频换成了等长静音、元数据改成 `mania-judge / MJVerify N`，
+因此谱面 MD5 与原谱不同，导入时 `.osz` 和 `.osr` 要成对使用。判定只依赖物件时间/列/OD/HP 和
+按键帧，与 BPM、计时点、音频无关。（stable 的 `activeObjects` 切片会用到 ApproachTime，而它跟
+scroll speed 有关；重建谱的 scroll speed 与原谱不保证相同，不过实测中未观察到影响。）
+
+| 包 | 来源谱面（7K 无 mod） | 范围 | 物件 / 长条 |
+| --- | --- | --- | --- |
+| MJVerify-1 | Gong Xing Xian Shi Ji | 156–186s | 701 / 444 |
+| MJVerify-2 | Gong Xing Xian Shi Ji（另一条回放） | 156–186s | 701 / 444 |
+| MJVerify-3 | Life is Piano [7K SHD] | 63–93s | 484 / 211 |
+| MJVerify-4 | Minato Aqua's Galgame Carnival Vol.3 | 45–75s | 653 / 276 |
+| MJVerify-5 | SYSTEM ERROR [Obsession: Nyctophilia] | 244–274s | 1007 / 856 |
+| MJVerify-6 | Gong Xing Xian Shi Ji（1 号的定位片段） | 171–176s | 111 / 75 |
+| MJVerify-7 | Life is Piano [7K SHD] | 整图 | 1473 / 572 |

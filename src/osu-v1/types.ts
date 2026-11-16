@@ -13,7 +13,10 @@ export interface HoldJudgementV1 {
   exit: number
   actions: Action[]
   result: HitResult
+  /** 首次提前松手的时刻（兼容旧字段） */
   breakTime?: number
+  /** 每次提前松手的时刻：重新按下后再次提前松手会再记一次，每次都会重置连击 */
+  breakTimes?: number[]
   ticks: number[]
 }
 
