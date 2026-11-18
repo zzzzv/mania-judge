@@ -1,7 +1,7 @@
 {
   "name": "mania-judge",
   "type": "module",
-  "version": "0.4.1",
+  "version": "0.5.0",
   "description": "Simulate osu!mania judgements.",
   "author": "zzzzv",
   "license": "MIT",
@@ -22,8 +22,11 @@
     ".": "./dist/index.mjs",
     "./package.json": "./package.json"
   },
+  "types": "./dist/index.d.mts",
+  "sideEffects": false,
   "files": [
-    "dist"
+    "dist",
+    "doc"
   ],
   "scripts": {
     "build": "tsdown",
@@ -32,22 +35,27 @@
     "gen:stable-json:hold": "node --env-file=.env --import tsx tests/gen-stable-json.ts hold",
     "gen:stable-json:mods": "node --env-file=.env --import tsx tests/gen-stable-json.ts mods",
     "gen:stable-json": "pnpm gen:stable-json:tap-only && pnpm gen:stable-json:hold && pnpm gen:stable-json:mods",
+    "gen:lazer-index": "dotnet run --project tools/lazer-index -- --out tools/lazer-index/out/scores.json",
     "gen:lazer-json:tap-only": "node --import tsx tests/gen-lazer-json.ts tap-only",
     "gen:lazer-json:hold": "node --import tsx tests/gen-lazer-json.ts hold",
     "gen:lazer-json:mods": "node --import tsx tests/gen-lazer-json.ts mods",
     "gen:lazer-json": "pnpm gen:lazer-json:tap-only && pnpm gen:lazer-json:hold && pnpm gen:lazer-json:mods",
     "gen:osu-files": "node --import tsx tests/gen-osu-files.ts",
-    "test": "vitest",
+    "check:osr-stats": "node --import tsx scripts/check-osr-stats.ts",
+    "probe:slice": "node --import tsx scripts/probe-slice.ts",
+    "probe:compare": "node --import tsx scripts/compare-oracle.ts",
+    "tosu:capture": "node tools/tosu-verdict-capture/index.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:unit": "vitest run tests/osu-data.test.ts tests/timeline.test.ts",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "pnpm run build"
   },
-
   "devDependencies": {
-    "osu-mania-io": "^0.1.0",
     "@types/node": "^25.5.0",
     "@typescript/native-preview": "7.0.0-dev.20260328.1",
     "jszip": "^3.10.1",
+    "osu-mania-io": "^1.0.0",
     "osu-stable-db": "^0.2.4",
     "tsdown": "^0.21.7",
     "tsx": "^4.21.0",

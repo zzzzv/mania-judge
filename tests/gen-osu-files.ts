@@ -7,6 +7,7 @@ import { serializeBeatmap } from 'osu-mania-io/beatmap'
 import { serializeReplay } from 'osu-mania-io/replay'
 import type { ReplayFrame } from 'osu-mania-io/replay'
 
+import { decodeFrames } from './fixture-frames'
 import type { FixtureOutput } from './fixture-types'
 import { createSilentWav, createZipArchive, sanitizeFileNamePart } from './utils'
 
@@ -72,14 +73,29 @@ export const readFixture = async (jsonPath: string) => {
 
 const createBeatmapFromFixture = (fixture: FixtureOutput) => {
   const totalColumns = fixture.osuData.noteColumns.length
-  const timingPoint = { time: 0, beatLength: 1000, meter: 4, sampleSet: 1, sampleIndex: 0, volume: 100, uninherited: true, effects: 0, kind: 'timing' as const }
+  // osu-mania-io 1.0 起 ControlPoint 用 kind + sampleBank 建模，uninherited/effects 由 write 侧推导
+  const timingPoint = { time: 0, beatLength: 1000, meter: 4, sampleBank: 'default' as const, sampleIndex: 0, volume: 100, effectFlags: 0, kind: 'timing' as const }
 
   return {
+    // 14 是 osu-mania-io 的默认写出格式，显式写出来保持 .osu 内容不变
+    fileFormat: 14,
+    // 1.0 起 General 段所有键都是必填（0.1.x 里可省略的键不再有默认值）
     general: {
       audioFilename: DEFAULT_AUDIO_FILENAME,
+      audioLeadIn: 0,
       previewTime: fixture.osuData.noteColumns.flat().at(0)?.start ?? -1,
       countdown: 0 as const,
+      sampleBank: 'default' as const,
+      stackLeniency: 0.7,
+      mode: 3 as const,
+      letterboxInBreaks: false,
+      useSkinSprites: false,
+      overlayPosition: 'no-change' as const,
+      epilepsyWarning: false,
+      countdownOffset: 0,
       specialStyle: totalColumns % 2 === 1,
+      widescreenStoryboard: false,
+      samplesMatchPlaybackRate: false,
     },
     metadata: {
       title: fixture.title || DEFAULT_TITLE,
@@ -94,6 +110,7 @@ const createBeatmapFromFixture = (fixture: FixtureOutput) => {
       hpDrainRate: fixture.osuData.hp,
       keyCount: totalColumns,
       overallDifficulty: fixture.osuData.od,
+      approachRate: 5,
       sliderMultiplier: 1,
       sliderTickRate: 1,
     },
@@ -109,43 +126,9 @@ const createBeatmapFromFixture = (fixture: FixtureOutput) => {
   }
 }
 
-export const createReplayFrames = (fixture: FixtureOutput) => {
-  const transitions = fixture.osuData.actionColumns
-    .flatMap((actions) => actions.flatMap((action) => ([
-      { time: action.press, column: action.column, pressed: true },
-      { time: action.release, column: action.column, pressed: false },
-    ])))
-    .sort((left, right) => {
-      if (left.time !== right.time) {
-        return left.time - right.time
-      }
-
-      if (left.pressed !== right.pressed) {
-        return left.pressed ? 1 : -1
-      }
-
-      return left.column - right.column
-    })
-
-  const totalColumns = fixture.osuData.actionColumns.length
-  const frames: ReplayFrame[] = []
-  const activeColumns = new Set<number>()
-
-  const initialColumns = Array.from({ length: totalColumns }, () => false)
-  frames.push({ time: 0, columns: initialColumns })
-
-  for (const transition of transitions) {
-    if (transition.pressed) {
-      activeColumns.add(transition.column)
-    } else {
-      activeColumns.delete(transition.column)
-    }
-
-    const columns = Array.from({ length: totalColumns }, (_, i) => activeColumns.has(i))
-    frames.push({ time: transition.time, columns })
-  }
-
-  return frames
+export const createReplayFrames = (fixture: FixtureOutput): ReplayFrame[] => {
+  // fixture 里存的就是原始行表，直接展开即可（不需要再从按键区间反推）
+  return decodeFrames(fixture.osuData.frames, fixture.osuData.noteColumns.length)
 }
 
 const createScoreFromFixture = (fixture: FixtureOutput, beatmapHashMD5: string) => {

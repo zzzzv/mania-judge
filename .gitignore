@@ -15,3 +15,16 @@ coverage
 tests/fixtures/generated/
 tests/fixtures/stable/
 tests/fixtures/lazer/
+
+# tosu 抓的游戏内实测判定（本机复现，不入库）
+tests/fixtures/tosu/
+
+# tools/ 下 C# 辅助工具的构建产物
+[Bb]in/
+[Oo]bj/
+
+# lazer-oracle 的对拍产物（json / 日志，随时可重新生成）
+tools/lazer-oracle/out/
+
+# lazer-index 导出的分数索引（由 tools/lazer-index 从本机 client.realm 生成）
+tools/lazer-index/out/

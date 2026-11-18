@@ -24,13 +24,32 @@ export interface HoldJudgementV2 {
 
 export type JudgementV2 = TapJudgement | HoldJudgementV2
 
-export function isHoldV2(judgement: JudgementV2): judgement is HoldJudgementV2 {
+export function isHoldJudgement(judgement: JudgementV2): judgement is HoldJudgementV2 {
   return 'headResult' in judgement
 }
 
 /** Extract the statistics result from a judgement (head result for holds). */
 export function getResult(judgement: JudgementV2): HitResult {
-  return isHoldV2(judgement) ? judgement.headResult : judgement.result
+  return isHoldJudgement(judgement) ? judgement.headResult : judgement.result
+}
+
+/**
+ * 六档计数。
+ *
+ * 与 v1 不同：lazer 的长条头部与尾部各算一次判定（body / 父物件是 `IgnoreHit`，
+ * 不进计数），所以一个长条贡献 2 条，tap 贡献 1 条。
+ */
+export function countResults(judgements: readonly JudgementV2[]): HitResultTable<number> {
+  const counts: HitResultTable<number> = [0, 0, 0, 0, 0, 0]
+
+  for (const judgement of judgements) {
+    if (isHoldJudgement(judgement)) {
+      counts[judgement.headResult]++
+      counts[judgement.tailResult]++
+    } else counts[judgement.result]++
+  }
+
+  return counts
 }
 
 // ── Constants ────────────────────────────────────────────────────────
@@ -68,5 +87,5 @@ export function baseWindows(od: number): HitWindows {
 const RELEASE_WINDOW_LENIENCE = 1.5
 
 export function tailWindows(headWindows: Readonly<HitWindows>): HitWindows {
-  return headWindows.map(w => (w + 0.5) * RELEASE_WINDOW_LENIENCE) as HitWindows
+  return headWindows.map(w => w * RELEASE_WINDOW_LENIENCE) as HitWindows
 }

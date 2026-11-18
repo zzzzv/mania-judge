@@ -1,5 +1,11 @@
 import { HIT_RESULTS } from '../types'
-import type { Columns, HitResult, HitResultTable, TimeLineFrame } from '../types'
+import type {
+  Columns,
+  HitResult,
+  HitResultTable,
+  ScoreMultiplierInput,
+  TimeLineFrame,
+} from '../types'
 import type { JudgementV1 } from './types'
 import { isHoldJudgement } from './types'
 import { clamp } from '../utils'
@@ -65,11 +71,11 @@ function compareEvents(left: TimeLineEvent, right: TimeLineEvent): number {
 export function generateFrames(
   judgementColumns: Columns<JudgementV1>,
   lifeTable: HitResultTable<number>,
-  mods: readonly string[] = [],
+  multiplier: ScoreMultiplierInput = [],
 ): TimeLineFrame[] {
   const judgements = judgementColumns.flat()
   const sorted = judgements.flatMap(createEvents).sort(compareEvents)
-  const score = createScoreAccumulator(judgements.length, mods)
+  const score = createScoreAccumulator(judgements.length, multiplier)
 
   const frames: TimeLineFrame[] = []
   const last = {
@@ -126,11 +132,17 @@ export function generateFrames(
   return frames
 }
 
+/**
+ * 从判定结果直接生成时间轴（只需要 `hp`，不依赖整个 `OsuData`）。
+ *
+ * `multiplier` 是分数倍率：给数字就直接乘，给 mod 缩写列表按 ScoreV1 的规则换算
+ * （NF / EZ / HT 各 ×0.5），不传就是不含 mod 的分数。
+ */
 export function generateFramesOsu(
   judgementColumns: Columns<JudgementV1>,
   hp: number,
-  mods: readonly string[] = [],
+  multiplier: ScoreMultiplierInput = [],
 ): TimeLineFrame[] {
   const hpMultiplierNormal = computeHpMultiplierNormal(judgementColumns, hp)
-  return generateFrames(judgementColumns, createLifeTable(hp, hpMultiplierNormal), mods)
+  return generateFrames(judgementColumns, createLifeTable(hp, hpMultiplierNormal), multiplier)
 }

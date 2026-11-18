@@ -20,10 +20,14 @@ export function difficultyRange(difficulty: number, min: number, mid: number, ma
   return mid
 }
 
+/**
+ * lazer `ManiaHitWindows`：`Math.Floor(DifficultyRange(OD, ...) * speedMultiplier) + 0.5`。
+ * 那个 `+0.5` 不能省 —— 整数偏移下与 `floor` 等价，但小数毫秒物件会差半档。
+ */
 export function truncWindows(windows: Readonly<HitWindows>, scale: number = 1): HitWindows {
   const truncated: HitWindows = [...windows]
   for (let i = 0; i < truncated.length; i++) {
-    truncated[i] = Math.trunc(truncated[i] * scale + epsilon)
+    truncated[i] = Math.floor(truncated[i] * scale + epsilon) + 0.5
   }
   return truncated
 }

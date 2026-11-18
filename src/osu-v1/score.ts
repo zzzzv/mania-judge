@@ -1,5 +1,5 @@
 import { HIT_RESULTS } from '../types'
-import type { HitResult } from '../types'
+import type { HitResult, ScoreMultiplierInput } from '../types'
 import type { JudgementV1 } from './types'
 import { isHoldJudgement } from './types'
 
@@ -10,7 +10,7 @@ import { isHoldJudgement } from './types'
  *   - 判定值 `num`：MAX 320 / 300 / 200 / 100 / 50 / MISS 0
  *   - 手感项 `w * sqrt(health)`：MAX 32 / 300 32 / 200 16 / 100 8 / 50 4 / MISS 0
  *
- * `mult = 500000 / 物件数 * 倍率`（倍率只受 NF / EZ / HT 影响，各 ×0.5）。
+ * `mult = 500000 / 物件数 * 分数倍率`（倍率只受 NF / EZ / HT 影响，各 ×0.5，见 `scoreMultiplier`）。
  *
  * `health` 初始 100、夹在 [0, 100]，**每次判定前**如果当前连击是 384 的倍数就重置回 100。
  * 长条 tick（值为 7）与提前松手（-1048576）不加分也不改 health，但 tick 会 +1 连击、
@@ -28,6 +28,21 @@ const SCORE_TABLE: Readonly<Record<number, readonly [number, number, number]>> =
 }
 
 const MOD_MULTIPLIER: Readonly<Record<string, number>> = { NF: 0.5, EZ: 0.5, HT: 0.5 }
+
+/** ScoreV1 的分数倍率：只有 NF / EZ / HT 影响基础分，各 ×0.5。 */
+export function scoreMultiplier(mods: readonly string[]): number {
+  let multiplier = 1
+  for (const mod of mods) {
+    multiplier *= MOD_MULTIPLIER[mod] ?? 1
+  }
+  return multiplier
+}
+
+/** 数字原样用，mod 列表按规则换算；不传等于 1。 */
+function resolveMultiplier(input: ScoreMultiplierInput | undefined): number {
+  if (input === undefined) return 1
+  return typeof input === 'number' ? input : scoreMultiplier(input)
+}
 
 /** .NET 的 Math.Round 默认是中点取偶 */
 function roundHalfEven(value: number): number {
@@ -53,14 +68,9 @@ export interface ScoreAccumulator {
 
 export function createScoreAccumulator(
   total: number,
-  mods: readonly string[] = [],
+  multiplier: ScoreMultiplierInput = [],
 ): ScoreAccumulator {
-  let modifier = 1
-  for (const mod of mods) {
-    modifier *= MOD_MULTIPLIER[mod] ?? 1
-  }
-
-  const unit = total > 0 ? 500_000 / total * modifier : 0
+  const unit = total > 0 ? 500_000 / total * resolveMultiplier(multiplier) : 0
   let combo = 0
   let health = 100
   let raw = 0
@@ -155,9 +165,9 @@ function buildEvents(judgements: readonly JudgementV1[]): ScoreEvent[] {
 /** ScoreV1（0 ~ 1,000,000） */
 export function calculateScoreV1(
   judgements: readonly JudgementV1[],
-  mods: readonly string[] = [],
+  multiplier: ScoreMultiplierInput = [],
 ): number {
-  const accumulator = createScoreAccumulator(judgements.length, mods)
+  const accumulator = createScoreAccumulator(judgements.length, multiplier)
   for (const event of buildEvents(judgements)) {
     accumulator.push(event.kind, event.result)
   }

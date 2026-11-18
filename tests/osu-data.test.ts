@@ -20,11 +20,18 @@ const replay = {
 
 describe('createOsuData', () => {
   it('reads difficulty and the mod scaling fields', () => {
-    const data = createOsuData({ ...beatmap, speedMultiplier: 1.5, hitWindowScale: 0.7 }, replay)
+    // osu-mania-io 1.0 起 mod 结果里是 lazer 口径的 difficultyMultiplier（HR = 1.4），窗口倍率是它的倒数
+    const data = createOsuData({ ...beatmap, speedMultiplier: 1.5, difficultyMultiplier: 1.4 }, replay)
 
     expect(data.od).toBe(8)
     expect(data.hp).toBe(7)
     expect(data.speedRate).toBe(1.5)
+    expect(data.windowScale).toBeCloseTo(1 / 1.4)
+  })
+
+  it('accepts the legacy hitWindowScale field', () => {
+    const data = createOsuData({ ...beatmap, speedMultiplier: 1.5, hitWindowScale: 0.7 }, replay)
+
     expect(data.windowScale).toBe(0.7)
   })
 
@@ -44,16 +51,11 @@ describe('createOsuData', () => {
     expect(noteColumns[2]).toEqual([])
   })
 
-  it('folds replay frames into press/release actions', () => {
-    const { actionColumns } = createOsuData(beatmap, replay)
+  it('passes the replay row table through untouched', () => {
+    const { frames } = createOsuData(beatmap, replay)
 
-    expect(actionColumns[0]).toEqual([{ column: 0, press: 990, release: 1020 }])
-    expect(actionColumns[1]).toEqual([])
-  })
-
-  it('keeps the raw frame timeline', () => {
-    const { frameTimes } = createOsuData(beatmap, replay)
-
-    expect(frameTimes).toEqual([900, 990, 1020])
+    expect(frames).toBe(replay.frames)
+    expect(frames.map((frame) => frame.time)).toEqual([900, 990, 1020])
+    expect(frames[1]!.columns[0]).toBe(true)
   })
 })

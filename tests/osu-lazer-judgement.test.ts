@@ -1,10 +1,11 @@
-import { readdirSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 
 import { describe, expect, it } from 'vitest'
 
 import { lazer, type HitResultTable } from '../src'
+import { toOsuData } from './fixture-frames'
+import { fixtureNames, fixturesRoot } from './fixtures'
 import type { FixtureOutput } from './fixture-types'
 
 /**
@@ -14,16 +15,10 @@ import type { FixtureOutput } from './fixture-types'
  * 都算进去（stable 的 V1 是合并成一个）。
  */
 
-const fixturesRoot = path.resolve(import.meta.dirname, 'fixtures/lazer')
-
-function fixtureNames(dirName: string) {
-  return readdirSync(path.join(fixturesRoot, dirName)).filter((name) => name.endsWith('.json'))
-}
-
 async function expectJudgementMatches(dirName: string, fixtureName: string) {
-  const content = await readFile(path.join(fixturesRoot, dirName, fixtureName), 'utf8')
+  const content = await readFile(path.join(fixturesRoot, 'lazer', dirName, fixtureName), 'utf8')
   const fixture = JSON.parse(content) as FixtureOutput
-  const judgements = lazer.playOsu(fixture.osuData)
+  const judgements = lazer.playOsu(toOsuData(fixture))
 
   const counts: HitResultTable<number> = [0, 0, 0, 0, 0, 0]
   for (const judgement of judgements.flat()) {
@@ -38,20 +33,14 @@ async function expectJudgementMatches(dirName: string, fixtureName: string) {
   expect(counts).toEqual(fixture.scoreInfo.statistics)
 }
 
-describe('osu-lazer judgement — tap-only', () => {
-  for (const fixtureName of fixtureNames('tap-only')) {
-    it(fixtureName, () => expectJudgementMatches('tap-only', fixtureName))
-  }
-})
+for (const group of ['tap-only', 'hold', 'mods']) {
+  describe(`osu-lazer judgement — ${group}`, () => {
+    const names = fixtureNames('lazer', group)
 
-describe('osu-lazer judgement — hold', () => {
-  for (const fixtureName of fixtureNames('hold')) {
-    it(fixtureName, () => expectJudgementMatches('hold', fixtureName))
-  }
-})
+    if (names.length === 0) it.skip('缺少样本（见启动时的提示）', () => {})
 
-describe('osu-lazer judgement — mods', () => {
-  for (const fixtureName of fixtureNames('mods')) {
-    it(fixtureName, () => expectJudgementMatches('mods', fixtureName))
-  }
-})
+    for (const fixtureName of names) {
+      it(fixtureName, () => expectJudgementMatches(group, fixtureName))
+    }
+  })
+}

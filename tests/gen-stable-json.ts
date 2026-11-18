@@ -12,6 +12,7 @@ import type { BeatmapScoreMatch, BeatmapScoreQuery } from 'osu-stable-db/node'
 
 import { v1, calcAccuracy, createOsuData } from '../src'
 import { formatJson, pathExists } from './utils'
+import { encodeFrames } from './fixture-frames'
 import type { FixtureOutput } from './fixture-types'
 import {
   CONDITION_GROUPS,
@@ -192,7 +193,9 @@ const createOutputFromPath = async (
   const keyCount = beatmap.difficulty.keyCount
   const replay = parseReplay(replayBuffer, keyCount)
   const mods = replay.mods
-  const modded = mods !== 0 ? applyLegacyBeatmapMods(beatmap, mods) : undefined
+  const modded = mods !== 0
+    ? applyLegacyBeatmapMods(beatmap, mods, { randomSeed: replay.stableRandomSeed })
+    : undefined
   const effectiveBeatmap = modded ?? beatmap
   const holdRatio = beatmap.hitObjects.length > 0
     ? beatmap.hitObjects.filter((o) => o.endTime !== undefined).length / beatmap.hitObjects.length
@@ -222,7 +225,10 @@ const createOutputFromPath = async (
       accuracy: calcAccuracy(statistics, [...v1.accTable] as HitResultTable<number>),
     },
     lifeFrames: [],
-    osuData,
+    osuData: {
+      ...osuData,
+      frames: encodeFrames(osuData.frames),
+    },
   }
 }
 

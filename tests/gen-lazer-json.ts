@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import process from 'node:process'
 
@@ -6,7 +7,8 @@ import { parseReplay } from 'osu-mania-io/replay'
 import { applyBeatmapMods, applyLegacyBeatmapMods } from 'osu-mania-io/mod'
 import type { LazerMod, LegacyModBitmask } from 'osu-mania-io/mod'
 
-import { v1, calcAccuracy, beatmapToNoteColumns, replayToActionColumns, replayToFrameTimes } from '../src'
+import { v1, calcAccuracy, createOsuData } from '../src'
+import { encodeFrames } from './fixture-frames'
 import type { FixtureOutput } from './fixture-types'
 import { CONDITION_GROUPS, validateConditions, writeOutputs } from './shared'
 import type { QueryCondition, ConditionGroupName } from './shared'
@@ -15,23 +17,33 @@ import type { HitResultTable } from '../src/types'
 
 // ── Config ────────────────────────────────────────────────────────────
 
-const LAZER_API_BASE = 'http://localhost:5048'
+/** `lazer-index` 的默认输出位置，可用 `--index` 或 `LAZER_INDEX` 覆盖。 */
+const DEFAULT_INDEX_PATH = path.resolve(import.meta.dirname, '../tools/lazer-index/out/scores.json')
+
+/** 每个条件最多看多少条候选（对应旧实现的 `LIMIT(200)`）。 */
 const MAX_SCORE_RESULTS = 200
 
-// ── Helpers ───────────────────────────────────────────────────────────
-
-/** Extract the SHA256 hex hash from a RealmFile reference string. */
-const extractReplayHash = (fileRef: unknown): string | undefined => {
-  if (typeof fileRef === 'string') {
-    const match = /RealmFile\s*\(Hash\s*=\s*([a-fA-F0-9]+)\)/.exec(fileRef)
-    return match?.[1]?.toLowerCase()
-  }
-  if (fileRef !== null && typeof fileRef === 'object') {
-    const obj = fileRef as Record<string, unknown>
-    if (typeof obj.Hash === 'string') return obj.Hash.toLowerCase()
-  }
-  return undefined
+/** `lazer-index` 导出的索引（camelCase；null 字段被省略）。 */
+interface IndexScore {
+  id: string
+  beatmapHash?: string
+  beatmapPath?: string
+  replayPath?: string
+  playedAt?: number
+  maxCombo?: number
+  accuracy?: number
+  totalScore?: number
+  modsJson?: string
+  rank?: string
 }
+
+interface IndexDocument {
+  dataDirectory?: string
+  clientVersion?: string
+  scores: IndexScore[]
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────
 
 /** Parse lazer mod acronyms from ModsJson string. */
 const parseModsJson = (modsJson: string): string[] => {
@@ -65,149 +77,65 @@ const hasMatchingMods = (scoreMods: string[], expectedMods: string[]): boolean =
     && expectedMods.every((mod) => effectiveMods.includes(mod))
 }
 
-const getLazerModAcronyms = (score: LazerScoreInfo): string[] => {
-  // Try ModsJson first
-  if (score.ModsJson) {
-    return parseModsJson(score.ModsJson)
-  }
-  return []
-}
+const getIndexModAcronyms = (score: IndexScore): string[] => parseModsJson(score.modsJson ?? '')
 
-const buildAccuracyRql = (
-  condition: QueryCondition,
-): string => {
+/**
+ * 条件预筛，语义与原 RQL 保持一致：
+ * `Ruleset.ShortName=="mania" AND Accuracy>=min AND Accuracy<=max
+ *  AND NOT (ModsJson CONTAINS "CL")`，非 NM 时再加 `ModsJson CONTAINS "<mod>"`。
+ * 索引本身只导出 mania 分数，所以 ruleset 条件不用再判断。
+ */
+const matchesConditionPrefilter = (score: IndexScore, condition: QueryCondition): boolean => {
+  const accuracy = score.accuracy ?? 0
   const [minAcc, maxAcc] = condition.accuracyRange
-  const parts = [
-    'Ruleset.ShortName=="mania"',
-    `Accuracy>=${minAcc}`,
-    `Accuracy<=${maxAcc}`,
-  ]
+  if (accuracy < minAcc || accuracy > maxAcc) return false
 
-  // Always exclude CL mod — scores with CL use Classic judging formula
-  // which differs from the non-Classic formula we implement.
-  parts.push('NOT (ModsJson CONTAINS "CL")')
+  // Scores with the Classic mod use the Classic judgement formula, which differs
+  // from the non-Classic formula we implement.
+  const mods = getIndexModAcronyms(score)
+  if (mods.includes('CL')) return false
 
-  // For non-NM mods, also filter by the specific mod acronym
-  if (condition.mods.length === 1 && condition.mods[0] !== 'NM') {
-    parts.push(`ModsJson CONTAINS "${condition.mods[0]}"`)
+  if (condition.mods.length === 1 && condition.mods[0] !== 'NM' && !mods.includes(condition.mods[0])) {
+    return false
   }
 
-  return parts.join(' AND ')
+  return true
 }
 
-// ── HTTP client ───────────────────────────────────────────────────────
+// ── Index loading ─────────────────────────────────────────────────────
 
-interface LazerApiResponse<T> {
-  count: number
-  items: T[]
-}
-
-interface LazerScoreInfo {
-  ID: string
-  BeatmapHash: string
-  Hash: string
-  Files?: { File: unknown; Filename: string }[]
-  TotalScore: number
-  TotalScoreWithoutMods?: number
-  LegacyTotalScore?: number
-  MaxCombo: number
-  Accuracy: number
-  ModsJson: string
-  StatisticsJson?: string
-  Statistics?: Record<string, number>
-  Mods?: unknown[]
-  APIMods?: { Acronym: string; Settings: unknown }[]
-  Passed?: boolean
-  Combo?: number
-}
-
-interface StatusResponse {
-  version: string
-  lazer: {
-    clientRealmPath: string
-    isAvailable: boolean
-  }
-}
-
-const checkBackendStatus = async (): Promise<void> => {
-  let status: StatusResponse
+const loadIndex = async (indexPath: string): Promise<IndexDocument> => {
+  let content: string
   try {
-    status = await fetchJson<StatusResponse>(`${LAZER_API_BASE}/api/status`)
+    content = await readFile(indexPath, 'utf8')
   } catch {
-    console.error(`Error: cannot reach backend at ${LAZER_API_BASE}`)
-    console.error('Make sure OsuLocalServer is running')
-    process.exit(1)
+    throw new Error(
+      `读不到 lazer 索引：${indexPath}\n`
+      + '先导出：dotnet run --project tools/lazer-index -- --out tools/lazer-index/out/scores.json',
+    )
   }
 
-  if (!status.lazer.isAvailable) {
-    console.error('Error: lazer module is not available on the backend')
-    console.error(`  clientRealmPath: ${status.lazer.clientRealmPath}`)
-    console.error('Make sure osu!lazer has been run at least once to generate client.realm')
-    process.exit(1)
+  const document = JSON.parse(content) as IndexDocument
+  if (!Array.isArray(document.scores)) {
+    throw new Error(`索引格式不对（缺少 scores 数组）：${indexPath}`)
   }
 
-  console.log(`Backend connected (v${status.version}), lazer module available`)
-}
-
-// ── Types & Functions ─────────────────────────────────────────────
-
-const fetchJson = async <T>(url: string): Promise<T> => {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${url}`)
-  }
-  return response.json() as Promise<T>
-}
-
-const fetchBuffer = async (url: string): Promise<ArrayBuffer> => {
-  const response = await fetch(url)
-  if (!response.ok) {
-    throw new Error(`HTTP ${response.status}: ${url}`)
-  }
-  return response.arrayBuffer()
-}
-
-const queryScores = async (
-  rql: string,
-  depth = 2,
-): Promise<LazerScoreInfo[]> => {
-  const url = `${LAZER_API_BASE}/api/lazer/scores?rql=${encodeURIComponent(rql)}&depth=${depth}&noExpand=User&noExpand=BeatmapInfo`
-  const result = await fetchJson<LazerApiResponse<LazerScoreInfo>>(url)
-  return result.items
-}
-
-const fetchOsuFile = (beatmapHash: string): Promise<string> => {
-  const url = `${LAZER_API_BASE}/api/lazer/files/${beatmapHash}`
-  return fetch(url).then((r) => {
-    if (!r.ok) throw new Error(`HTTP ${r.status} fetching .osu: ${url}`)
-    return r.text()
-  })
-}
-
-const fetchReplayFile = (replayHash: string): Promise<ArrayBuffer> => {
-  const url = `${LAZER_API_BASE}/api/lazer/files/${replayHash}`
-  return fetchBuffer(url)
+  return document
 }
 
 // ── Conversion ────────────────────────────────────────────────────────
 
-const createFixtureFromLazerScore = async (
-  score: LazerScoreInfo,
-): Promise<FixtureOutput | null> => {
-  const beatmapHash = score.BeatmapHash
-  if (!beatmapHash) return null
+const createFixtureFromScore = async (score: IndexScore): Promise<FixtureOutput | null> => {
+  const { beatmapPath, replayPath } = score
+  if (!beatmapPath || !replayPath) return null
 
-  // Extract replay hash from Files[0].File
-  const replayHash = score.Files?.[0] ? extractReplayHash(score.Files[0].File) : undefined
-  if (!replayHash) return null
-
-  // Fetch .osu and replay in parallel
+  // 索引里给的就是绝对路径，直接读文件
   let osuContent: string
-  let replayBuffer: ArrayBuffer
+  let replayBuffer: Buffer
   try {
     [osuContent, replayBuffer] = await Promise.all([
-      fetchOsuFile(beatmapHash),
-      fetchReplayFile(replayHash),
+      readFile(beatmapPath, 'utf8'),
+      readFile(replayPath),
     ])
   } catch {
     return null
@@ -219,7 +147,7 @@ const createFixtureFromLazerScore = async (
   try {
     beatmap = parseBeatmap(osuContent)
     const keyCount = beatmap.difficulty.keyCount
-    replay = parseReplay(new Uint8Array(replayBuffer), keyCount)
+    replay = parseReplay(replayBuffer, keyCount)
   } catch {
     return null
   }
@@ -229,36 +157,21 @@ const createFixtureFromLazerScore = async (
   const lazerMods = replay.lazer?.mods
   const legacyMods = replay.mods as LegacyModBitmask
 
-  let effectiveBeatmap: ReturnType<typeof parseBeatmap> & {
-    speedMultiplier?: number
-    hitWindowScale?: number
-  }
-
-  if (lazerMods && lazerMods.length > 0) {
-    effectiveBeatmap = applyBeatmapMods(beatmap, lazerMods as LazerMod[])
-  } else if (legacyMods !== 0) {
-    effectiveBeatmap = applyLegacyBeatmapMods(beatmap, legacyMods)
-  } else {
-    effectiveBeatmap = beatmap as typeof effectiveBeatmap
-  }
+  const effectiveBeatmap = lazerMods && lazerMods.length > 0
+    ? applyBeatmapMods(beatmap, lazerMods as LazerMod[])
+    : legacyMods !== 0
+      ? applyLegacyBeatmapMods(beatmap, legacyMods, { randomSeed: replay.stableRandomSeed })
+      : beatmap
 
   // Calculate hold ratio from parsed beatmap
   const holdRatio = beatmap.hitObjects.length > 0
     ? beatmap.hitObjects.filter((o) => o.endTime !== undefined).length / beatmap.hitObjects.length
     : 0
 
-  // Build osuData
-  const speedRate = effectiveBeatmap.speedMultiplier ?? 1
-  const windowScale = effectiveBeatmap.hitWindowScale ?? 1
-
+  // Build osuData（字段换算统一走 createOsuData，避免和库里的口径漂移）
   const osuData = {
-    od: effectiveBeatmap.difficulty.overallDifficulty,
-    hp: effectiveBeatmap.difficulty.hpDrainRate,
-    speedRate,
-    windowScale,
-    noteColumns: beatmapToNoteColumns(effectiveBeatmap),
-    actionColumns: replayToActionColumns(replay.frames, beatmap.difficulty.keyCount),
-    frameTimes: replayToFrameTimes(replay.frames),
+    ...createOsuData(effectiveBeatmap, replay),
+    frames: encodeFrames(replay.frames),
   }
 
   // Build scoreInfo
@@ -269,14 +182,14 @@ const createFixtureFromLazerScore = async (
   if (lazerMods && lazerMods.length > 0) {
     modAcronyms = lazerMods.map((m: LazerMod) => m.acronym)
   } else {
-    modAcronyms = getLazerModAcronyms(score)
+    modAcronyms = getIndexModAcronyms(score)
   }
   if (filterCosmeticMods(modAcronyms).length === 0) {
     modAcronyms = ['NM']
   }
 
-  // Accuracy: prefer replay's computed accuracy, fall back to ScoreInfo
-  const accuracy = score.Accuracy ?? calcAccuracy(statistics, [...v1.accTable] as HitResultTable<number>)
+  // Accuracy: prefer the value recorded by lazer, fall back to the replay's stats
+  const accuracy = score.accuracy ?? calcAccuracy(statistics, [...v1.accTable] as HitResultTable<number>)
 
   return {
     title: beatmap.metadata.title ?? '',
@@ -299,6 +212,7 @@ const createFixtureFromLazerScore = async (
 // ── Query logic ───────────────────────────────────────────────────────
 
 const queryLazerFixtures = async (
+  scores: IndexScore[],
   conditions: QueryCondition[],
 ): Promise<FixtureOutput[]> => {
   validateConditions(conditions)
@@ -306,34 +220,27 @@ const queryLazerFixtures = async (
   const counts = conditions.map(() => 0)
   const results: FixtureOutput[] = []
 
-  // Process conditions in order, querying scores for each accuracy range
+  // Process conditions in order, picking candidates for each accuracy range
   for (let condIdx = 0; condIdx < conditions.length; condIdx++) {
     const condition = conditions[condIdx]
     const needed = condition.count
 
     if (counts[condIdx] >= needed) continue
 
-    // Build RQL and query scores
-    const rql = `${buildAccuracyRql(condition)} LIMIT(${MAX_SCORE_RESULTS})`
-    let scores: LazerScoreInfo[]
+    const candidates = scores
+      .filter((score) => matchesConditionPrefilter(score, condition))
+      .slice(0, MAX_SCORE_RESULTS)
 
-    try {
-      scores = await queryScores(rql)
-    } catch (err) {
-      console.warn(`Query failed for condition ${condIdx}: ${err}`)
-      continue
-    }
+    console.log(`  Condition ${condIdx} (acc ${condition.accuracyRange[0]}-${condition.accuracyRange[1]}, hold ${condition.holdRatioRange[0]}-${condition.holdRatioRange[1]}): got ${candidates.length} candidates`)
 
-    console.log(`  Condition ${condIdx} (acc ${condition.accuracyRange[0]}-${condition.accuracyRange[1]}, hold ${condition.holdRatioRange[0]}-${condition.holdRatioRange[1]}): got ${scores.length} candidates`)
-
-    for (const score of scores) {
+    for (const score of candidates) {
       if (counts[condIdx] >= needed) break
 
       // Filter mods client-side
-      const scoreMods = getLazerModAcronyms(score)
+      const scoreMods = getIndexModAcronyms(score)
       if (!hasMatchingMods(scoreMods, condition.mods)) continue
 
-      const fixture = await createFixtureFromLazerScore(score)
+      const fixture = await createFixtureFromScore(score)
       if (!fixture) continue
 
       // Check hold ratio
@@ -351,22 +258,53 @@ const queryLazerFixtures = async (
 
 // ── Main ──────────────────────────────────────────────────────────────
 
-const main = async () => {
-  const groupName = process.argv[2]
-  if (!groupName || !(groupName in CONDITION_GROUPS)) {
-    throw new Error('Usage: gen-lazer-json.ts <tap-only|hold|mods>')
+interface CliOptions {
+  groupName: ConditionGroupName
+  indexPath: string
+}
+
+const parseArgs = (argv: string[]): CliOptions => {
+  let groupName: string | undefined
+  let indexPath: string = process.env.LAZER_INDEX ?? DEFAULT_INDEX_PATH
+
+  for (let index = 0; index < argv.length; index++) {
+    const arg = argv[index]
+
+    if (arg === '--index' || arg === '-i') {
+      const value = argv[++index]
+      if (!value) throw new Error('--index 需要一个路径参数')
+      indexPath = value
+      continue
+    }
+
+    if (arg.startsWith('-')) throw new Error(`未知参数：${arg}`)
+    if (groupName !== undefined) throw new Error('一次只能生成一个条件组')
+
+    groupName = arg
   }
 
-  await checkBackendStatus()
+  if (!groupName || !(groupName in CONDITION_GROUPS)) {
+    throw new Error('Usage: gen-lazer-json.ts <tap-only|hold|mods> [--index <path>]')
+  }
 
-  const conditions = CONDITION_GROUPS[groupName as ConditionGroupName]
+  return {
+    groupName: groupName as ConditionGroupName,
+    indexPath: path.resolve(process.cwd(), indexPath),
+  }
+}
+
+const main = async () => {
+  const { groupName, indexPath } = parseArgs(process.argv.slice(2))
+
+  const document = await loadIndex(indexPath)
+  console.log(`Index: ${indexPath} (lazer ${document.clientVersion ?? 'unknown'}, ${document.scores.length} scores)`)
+
+  const conditions = CONDITION_GROUPS[groupName]
   const maxCount = conditions.reduce((total, c) => total + c.count, 0)
 
-  console.log(`Querying lazer API (${
-    LAZER_API_BASE
-  }) for ${groupName} fixtures (target: ${maxCount} scores)...`)
+  console.log(`Generating ${groupName} fixtures (target: ${maxCount} scores)...`)
 
-  const fixtures = await queryLazerFixtures(conditions)
+  const fixtures = await queryLazerFixtures(document.scores, conditions)
   const outputDir = path.resolve(import.meta.dirname, `fixtures/lazer/${groupName}`)
   const filePaths = await writeOutputs(outputDir, fixtures)
 

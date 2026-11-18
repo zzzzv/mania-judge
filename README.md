@@ -1,15 +1,15 @@
 # mania-judge
 
-Simulates osu!mania judgements, combo, life and ScoreV1 from `.osu` + `.osr` data.
+Simulates osu!mania judgements, combo, life and score from `.osu` + `.osr` data — for both
+**osu!stable (V1)** and **osu!lazer** (ScoreV1 and the standardised score respectively).
 
-The design goal is a **faithful reproduction of osu!stable** rather than an approximation:
-judgement is evaluated per column (each column only talks to its own notes and its own
-input), and the whole run is judged first, then combo / life / score are derived from the
-resulting judgement list.
+The design goal is a **faithful reproduction** rather than an approximation: judgement is
+evaluated per column (each column only talks to its own notes and its own input), and the whole
+run is judged first, then combo / life / score are derived from the resulting judgement list.
 
 - [中文说明](./README.zh-CN.md)
-- [osu!v1 判定逻辑](./doc/osu-v1-mania-judgement.md)（中文）
-- [osu!v1 时间轴逻辑](./doc/osu-v1-timeline.md)（中文）
+- [osu!v1（stable）规则](./doc/osu-v1.md)（中文）
+- [osu!lazer 规则](./doc/osu-lazer.md)（中文）
 
 ## Install
 
@@ -25,47 +25,34 @@ ESM only, with bundled type declarations and no runtime dependencies.
 
 ## Status
 
-Work in progress. Numbers below come from 97 replay fixtures (7K–18K mania maps) that are
-compared against the counts / score / combo stored in the `.osr` header.
+Numbers come from replay fixtures (7K–18K mania maps), compared against the counts / combo / score
+stored in the `.osr` header. The header records the original play, while replaying re-judges, so
+treat it as an approximate baseline — see [doc/osu-v1.md](doc/osu-v1.md) and
+[doc/osu-lazer.md](doc/osu-lazer.md).
 
 ### v1 (osu!stable)
 
-**Judgement** — column-based state machine driven by the replay's raw frame times.
-
-- 90 / 97 fixtures match the header's six-tier counts exactly.
-- The remaining 7 fixtures differ by 1–5 events out of 1.5k–14k objects (all 7K maps).
-  This residual is **not** a deviation of this library from stable: the header stores the
-  counts of the original play, while stable re-judges when replaying. On a full-map test
-  (Life is Piano 7K, 1473 objects) the game's replay re-judgement gives
-  783/508/138/**26**/8/**10** versus the header's 25/11, and matches this library exactly
-  (max combo included). See [doc/osu-v1-mania-judgement.md](doc/osu-v1-mania-judgement.md).
-
-**Timeline** — combo / life / ScoreV1 derived from the judgement list.
-
-| Item | Exact | Note |
+| Item | Exact | Deviation |
 | --- | --- | --- |
-| max combo | 73 / 97 | the rest are off by ±1 |
-| ScoreV1 | 43 / 97 | the rest are off by a median of ±50 (≈0.01%), worst 1136 (0.15%) |
+| six-tier counts | 94 / 97 | the other 3 differ by two events each (one up, one down, net 0) |
+| max combo | 90 / 97 | 1–5 |
+| ScoreV1 | 47 / 97 | median 49, worst 1136 |
 
-Judgement and timeline are tested separately (`tests/osu-v1-judgement.test.ts`,
-`tests/osu-v1-timeline.test.ts`), with exact assertions and no tolerance.
+The v1 score residual is concentrated on long-note maps: the health write path is only partly known
+(single-tap maps are 39 / 40 exact).
 
 ### lazer
 
-**tap-only is exact**: 38 / 38 fixtures match the header's six-tier counts, max combo exact on
-37 / 38.
+| Item | Exact | Deviation |
+| --- | --- | --- |
+| six-tier counts | tap-only 77 / 78 · LN 3 / 31 · mods 0 / 17 | LN 626 events in total (≈ 20 per fixture), mods 436 (≈ 26) |
+| max combo | 71 / 78 · 24 / 31 · 13 / 17 | 0–2 |
+| standardised score | 20 / 78 · 0 / 31 · 0 / 17 | median 0 / 91 / −28, worst 1106 / 1741 / 948 |
 
-Long notes are implemented (head and tail judged separately, break → repress supported, tail capped
-to Meh when the head was missed or the body broke) but **not exact yet**:
-
-| Group | Exact | Total \|Δ\| | Per fixture |
-| --- | --- | --- | --- |
-| hold | 1 / 31 | 726 | ≈ 23 events |
-| mods | 0 / 12 | 348 | ≈ 29 events |
-
-The residual is pure misclassification between Perfect / Great / Good: the number of events and the
-Miss / Meh totals match, and the error is the same size in both directions. It points at the timing
-edge cases of the tail rather than at the event structure.
+The lazer residual is misclassification between Perfect / Great / Good — the total event count and
+the Miss / Meh totals match, and the error is the same size in both directions; the score figure is
+amplified by the combo term. Both rulesets are tested with exact assertions and no tolerance, so
+failing fixtures are the known-gap list (`tests/osu-v1-*.test.ts`, `tests/osu-lazer-*.test.ts`).
 
 ## Usage
 
@@ -73,19 +60,42 @@ edge cases of the tail rather than at the event structure.
 import { v1, calcAccuracy } from 'mania-judge'
 
 const judgements = v1.playOsu(osuData)
-const frames = v1.generateFramesOsu(judgements, osuData.hp, ['HR'])
+const frames = v1.generateFramesOsu(judgements, osuData.hp)
 const last = frames.at(-1)!
 
 console.log(last.resultCounts, last.maxCombo, last.life, last.score)
 console.log(calcAccuracy(last.resultCounts, v1.accTable))
 ```
 
-The third argument of `generateFramesOsu` is the replay's mod list; it only affects ScoreV1
-(`NF` / `EZ` / `HT` halve the score).
+The third argument of `generateFramesOsu` / `calculateScoreV1` is the **score multiplier**: pass a
+number directly, or pass the mod list and let the ruleset resolve it. `v1` only reacts to
+`NF` / `EZ` / `HT` (each ×0.5):
 
 ```ts
-// ScoreV1 on its own
-const score = v1.calculateScoreV1(judgements.flat(), ['DT'])
+v1.generateFramesOsu(judgements, osuData.hp, ['HT'])   // 0.5
+v1.generateFramesOsu(judgements, osuData.hp, 0.5)      // same thing
+v1.calculateScoreV1(judgements.flat(), ['HT'])
+v1.scoreMultiplier(['HT'])                             // 0.5
+```
+
+For lazer the same shape works, with life and the standardised score:
+
+```ts
+import { lazer } from 'mania-judge'
+
+const judgements = lazer.playOsu(osuData)
+const frames = lazer.generateFramesOsu(judgements, osuData.hp)
+
+console.log(frames.at(-1)!.score)  // TotalScoreWithoutMods, 0 ~ 1,000,000
+console.log(frames.at(-1)!.life)   // 0 ~ 1
+```
+
+Same third argument, resolved with the mania mod table (`HT` 0.3, `EZ` + `HT` 0.15, `DT` 1):
+
+```ts
+lazer.generateFramesOsu(judgements, osuData.hp, ['HT'])   // TotalScore
+lazer.generateFramesOsu(judgements, osuData.hp, 0.3)      // same
+lazer.scoreMultiplier(['HT'])                             // 0.3
 ```
 
 ### Loading a replay
@@ -103,7 +113,7 @@ import { createOsuData } from 'mania-judge'
 const beatmap = parseBeatmap(osuContent)
 const replay = parseReplay(osrBuffer, beatmap.difficulty.keyCount)
 
-// where mods get applied is up to you; the modded beatmap carries speedMultiplier / hitWindowScale
+// where mods get applied is up to you; the modded beatmap carries speedMultiplier / difficultyMultiplier
 const effective = replay.mods !== 0
   ? (applyLegacyBeatmapMods(beatmap, replay.mods) ?? beatmap)
   : beatmap
@@ -120,8 +130,34 @@ engine.
 - Fixtures are generated from that install and are **not** committed:
   `node --env-file=.env --import tsx tests/gen-stable-json.ts <tap-only|hold|mods>`
   (same for `gen-lazer-json.ts`). A fresh clone has to generate them before `pnpm test`.
+- The replay row table is stored as `[time, mask]` (bit i = column i pressed); tests expand it
+  into `OsuData` with `toOsuData` from `tests/fixture-frames.ts`.
 - `pnpm test` runs the whole suite. Judgement and timeline tests assert exact equality, so
   the failing cases are the current known gaps and are meant to be read as a to-do list.
+
+### Ruleset docs
+
+- `doc/osu-v1.md` — osu!stable (V1): judgement, timeline, accuracy
+- `doc/osu-lazer.md` — osu!lazer: judgement, timeline, accuracy (against the `.osr` header, the real
+  lazer source and a real in-game replay verification)
+
+### Debug tools
+
+| Tool | Purpose |
+| --- | --- |
+| `pnpm check:osr-stats <tap-only\|hold\|mods> [--verbose] [--timeline]` | whole-map smoke gate: six-bucket counts and accuracy vs the `.osr` header; `--timeline` adds `maxCombo` and score deviation stats |
+| `pnpm probe:slice <fixture.json> <outDir> [seconds=30]` | cut a real replay into short segment probes (keeps 500ms of lead-in state) |
+| `pnpm probe:compare <fixtureDir> <oracleDir>` | per-object diff between this library and real lazer dumps |
+| `pnpm tosu:capture <out.json> [--interval 20]` | record live in-game judgement counts via [tosu](https://github.com/tosuapp/tosu) |
+
+`tools/lazer-oracle` runs the real lazer judging code headless and dumps per-object results;
+`tools/lazer-index` exports the local lazer score index used to build fixtures. Whole-map dumps
+are slow and skew the tick grid — prefer segments (a 30s segment takes ~3s).
+
+Note on `.osr` statistics: they record the judgement **at play time**, possibly from an older
+build. lazer re-judges the same replay with current code and does not reproduce them exactly
+(verified against a real in-game capture), so they are only a smoke gate — use the segment
+oracle for exact comparison.
 
 ## Credits
 

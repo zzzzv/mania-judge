@@ -18,8 +18,8 @@ importers:
         specifier: ^3.10.1
         version: 3.10.1
       osu-mania-io:
-        specifier: ^0.1.0
-        version: 0.1.0
+        specifier: ^1.0.0
+        version: 1.0.0
       osu-stable-db:
         specifier: ^0.2.4
         version: 0.2.4
@@ -742,8 +742,9 @@ packages:
   osu-binary@0.1.0:
     resolution: {integrity: sha512-xsxnV29DN/DkoAlG383rJwAlkyfBaH/U7iRLtm0gVp8JEeduU4stqC+LcgfhbSb6uHH/h2X8UTLcPM4iJy6EZg==}
 
-  osu-mania-io@0.1.0:
-    resolution: {integrity: sha512-naiCcRaNYJmosdSb7bTonDmwpLu/psQ1S1Vk6o7H/79A8w4dE1ayTgkWfwNap5yGRpbVSz7REvzSJyNQMFal/Q==}
+  osu-mania-io@1.0.0:
+    resolution: {integrity: sha512-MBMJN5mNHae2ucjJgNXA4rI2z28UFHspnWvVrd7VQfvG++zlbDqjRWDBHl2mN75fD9P9SgWMAQXxU6noCO4YTQ==}
+    engines: {node: '>=18'}
 
   osu-stable-db@0.2.4:
     resolution: {integrity: sha512-O8D2+c4Gzo1CKsQu0AJUK9dJdxe1qbNOf4Fk32H4Z9djkC+wcnFFODtPwMtRWILwvwVVBIRA5epsu5tdAMOOHA==}
@@ -1515,7 +1516,7 @@ snapshots:
 
   osu-binary@0.1.0: {}
 
-  osu-mania-io@0.1.0:
+  osu-mania-io@1.0.0:
     dependencies:
       dotnet-random-ts: 0.1.0
       lzma-js-simple-v2: 1.2.3

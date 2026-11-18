@@ -2,6 +2,7 @@ import { HIT_RESULTS } from '../types'
 import type {
   Action,
   Columns,
+  Frame,
   HitResult,
   HitWindows,
   HoldNote,
@@ -66,104 +67,6 @@ function gradeBy(error: number, windows: HitWindows): HitResult {
     }
   }
   return HIT_RESULTS.Miss
-}
-
-/** 第一个 `>= time` 的帧时刻；传空表时退化成边界本身 */
-function resolveBoundary(time: number, frameTimes: readonly number[] | undefined): number {
-  if (!frameTimes || frameTimes.length === 0) {
-    return time
-  }
-
-  let lo = 0
-  let hi = frameTimes.length
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1
-    if (frameTimes[mid]! < time) {
-      lo = mid + 1
-    } else {
-      hi = mid
-    }
-  }
-
-  return lo < frameTimes.length ? frameTimes[lo]! : Number.POSITIVE_INFINITY
-}
-
-/** 第一个 `release > time` 的动作下标 */
-function firstActionAfter(actions: readonly Action[], time: number): number {
-  let lo = 0
-  let hi = actions.length
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1
-    if (actions[mid]!.release <= time) {
-      lo = mid + 1
-    } else {
-      hi = mid
-    }
-  }
-  return lo
-}
-
-/**
- * 关键帧：stable 的判定只在「按键边沿」和「物件边界落到的那一帧」上推进，
- * 所以按列把这些时刻收集起来逐帧重演，等价于全帧扫描但只跑必要帧。
- */
-function collectKeyFrames(
-  notes: readonly Note[],
-  actions: readonly Action[],
-  windows: HitWindows,
-  frameTimes: readonly number[] | undefined,
-): number[] {
-  const frames = new Set<number>()
-  const w50 = windows[HIT_RESULTS.Meh]
-  const w100 = windows[HIT_RESULTS.Ok]
-  const early = windows[HIT_RESULTS.Miss]
-
-  for (const action of actions) {
-    frames.add(action.press)
-    frames.add(action.release)
-  }
-
-  for (const note of notes) {
-    const end = note.end ?? note.start
-    for (const boundary of [
-      note.start - early,
-      note.start + w50,
-      // 变暗（dim）在 `now > start + W50` 的第一个帧生效，之后未按住的物件不再自动结算
-      note.start + w50 + 1,
-      end - w50,
-      end + w50,
-      end + w100,
-    ]) {
-      const frame = resolveBoundary(boundary, frameTimes)
-      if (Number.isFinite(frame)) {
-        frames.add(frame)
-      }
-    }
-
-    if (note.end === undefined) {
-      continue
-    }
-
-    // tick 从「按下时刻」起每 100ms 一次，按区间逐个推
-    for (let i = firstActionAfter(actions, note.start); i < actions.length; i++) {
-      const action = actions[i]!
-      if (action.press >= note.end) {
-        break
-      }
-      const stop = Math.min(action.release, note.end)
-      for (let time = action.press + LN_TICK_MS; time <= stop; time += LN_TICK_MS) {
-        // 网格点落在 start 之前时（提前按下的长条），tick 实际发生在
-        // 「不早于 start 的第一帧」：此时最后一个 tick 时刻还没前进，
-        // 该帧一到就满足 now - lastTick >= 100。只按 press + 100k 取帧会漏掉它。
-        const frame = resolveBoundary(Math.max(time, note.start), frameTimes)
-        if (Number.isFinite(frame)) {
-          frames.add(frame)
-        }
-      }
-    }
-  }
-
-  return [...frames].sort((left, right) => left - right)
 }
 
 function dimCheck(state: NoteState, now: number, runtime: ColumnRuntime): void {
@@ -497,19 +400,13 @@ function createState(note: Note, originalIndex: number, runtime: ColumnRuntime):
   }
 }
 
-/**
- * 精确模式：按列重演 stable 的 mania 判定状态机。
- *
- * `frameTimes` 是回放原始帧时间（升序）。判定里所有「当前时刻」都取
- * 「不早于边界的第一帧」，这样事件驱动和 stable 的逐帧扫描等价。
- * 不传时退化成用边界本身当时刻（只适合做近似估计）。
- */
-export function playColumnFrames(
-  notes: readonly Note[],
-  actions: readonly Action[],
-  windows: HitWindows,
-  frameTimes: readonly number[],
-): JudgementV1[] {
+interface ColumnPlayer {
+  runtime: ColumnRuntime
+  ordered: NoteState[]
+  original: NoteState[]
+}
+
+function createPlayer(notes: readonly Note[], windows: HitWindows): ColumnPlayer {
   const runtime: ColumnRuntime = {
     windows,
     w50: windows[HIT_RESULTS.Meh],
@@ -522,31 +419,35 @@ export function playColumnFrames(
     lastJudgedStart: -1e9,
   }
 
-  const states = notes.map((note, index) => createState(note, index, runtime))
-  const ordered = states.slice().sort((left, right) => left.start - right.start)
-  const keyFrames = collectKeyFrames(notes, actions, windows, frameTimes)
+  const original = notes.map((note, index) => createState(note, index, runtime))
+  const ordered = original.slice().sort((left, right) => left.start - right.start)
 
-  let actionIndex = 0
-  let previousHeld = false
+  return { runtime, ordered, original }
+}
 
-  for (const now of keyFrames) {
-    while (actionIndex < actions.length && actions[actionIndex]!.release <= now) {
-      actionIndex++
-    }
-    const held = actionIndex < actions.length && actions[actionIndex]!.press <= now
+/**
+ * 推进一帧：先更新这一列的按键状态，再跑一次列内扫描。
+ *
+ * 顺序是 stable 的：到期结算排在按键边沿之前（`tickNote` 里 `expire` 在最前），
+ * 并且一帧一列最多消费一个物件（`consumed`）。
+ */
+function advance(player: ColumnPlayer, time: number, held: boolean): void {
+  const { runtime } = player
 
-    runtime.wasHeld = previousHeld
-    runtime.held = held
-    runtime.consumed = false
+  runtime.wasHeld = runtime.held
+  runtime.held = held
+  runtime.consumed = false
 
-    tickColumn(now, ordered, runtime)
-    previousHeld = held
-  }
+  tickColumn(time, player.ordered, runtime)
+}
+
+function collect(player: ColumnPlayer): JudgementV1[] {
+  const { runtime, ordered, original } = player
 
   settle(ordered, runtime)
 
-  const judgements: JudgementV1[] = new Array(states.length)
-  for (const state of states) {
+  const judgements: JudgementV1[] = new Array(original.length)
+  for (const state of original) {
     if (state.isHold) {
       const hold: HoldJudgementV1 = {
         note: state.note as HoldNote,
@@ -574,30 +475,55 @@ export function playColumnFrames(
   return judgements
 }
 
-export function playFrames(
-  noteColumns: Columns<Note>,
-  actionColumns: Columns<Action>,
+/**
+ * 精确模式：单列重演 stable 的 mania 判定状态机。
+ *
+ * `frames` 是回放原始行表（升序）。判定的时钟就是行时间 —— 边界落在哪一帧，
+ * 就由那一帧结算，不再需要把边界映射到帧。
+ */
+export function playColumnFrames(
+  notes: readonly Note[],
+  column: number,
   windows: HitWindows,
-  frameTimes: readonly number[],
-): Columns<JudgementV1> {
-  const judgements: Columns<JudgementV1> = []
-  for (let column = 0; column < noteColumns.length; column++) {
-    judgements.push(
-      playColumnFrames(
-        noteColumns[column] ?? [],
-        actionColumns[column] ?? [],
-        windows,
-        frameTimes,
-      ),
-    )
+  frames: readonly Frame[],
+): JudgementV1[] {
+  const player = createPlayer(notes, windows)
+
+  for (const frame of frames) {
+    advance(player, frame.time, frame.columns[column] ?? false)
   }
-  return judgements
+
+  return collect(player)
 }
 
-export function playOsuFrames(data: OsuData): Columns<JudgementV1> {
+/**
+ * 精确模式：按回放行表逐帧推进所有列。
+ *
+ * 列之间完全独立（每列自己的按键状态、自己的物件游标），行主序扫描只是把
+ * 同一帧的推进放在一起；输出仍然是按列分组。
+ */
+export function playFrames(
+  noteColumns: Columns<Note>,
+  windows: HitWindows,
+  frames: readonly Frame[],
+): Columns<JudgementV1> {
+  const players = noteColumns.map((notes) => createPlayer(notes, windows))
+
+  for (const frame of frames) {
+    const { time, columns } = frame
+    for (let column = 0; column < players.length; column++) {
+      advance(players[column]!, time, columns[column] ?? false)
+    }
+  }
+
+  return players.map(collect)
+}
+
+/** 从 `OsuData` 直接判定的入口（与 `lazer.playOsu` 对应）。 */
+export function playOsu(data: OsuData): Columns<JudgementV1> {
   // stable 的窗口取整（向下），缩放之后同样取整
   const windows = truncateWindows(baseWindows(data.od), data.speedRate * data.windowScale)
-  return playFrames(data.noteColumns, data.actionColumns, windows, data.frameTimes)
+  return playFrames(data.noteColumns, windows, data.frames)
 }
 
 function truncateWindows(windows: HitWindows, scale: number): HitWindows {

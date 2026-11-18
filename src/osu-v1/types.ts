@@ -26,7 +26,12 @@ export function isHoldJudgement(judgement: JudgementV1): judgement is HoldJudgem
   return judgement.note.end !== undefined
 }
 
-export function countResults(judgements: JudgementV1[]): HitResultTable<number> {
+/** 取判定结果（v1 的头尾合并成一个判定，所以直接就是 `result`）。 */
+export function getResult(judgement: JudgementV1): HitResult {
+  return judgement.result
+}
+
+export function countResults(judgements: readonly JudgementV1[]): HitResultTable<number> {
   return judgements.reduce((sum, j) => {
     sum[j.result] += 1;
     return sum;
